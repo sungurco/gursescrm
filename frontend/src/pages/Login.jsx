@@ -42,7 +42,7 @@ export default function Login() {
               <ShieldCheck className="w-6 h-6" strokeWidth={1.5} />
             </div>
             <div>
-              <div className="font-heading font-semibold tracking-tight text-lg">Margin CRM</div>
+              <div className="font-heading font-semibold tracking-tight text-lg">Gürses CRM</div>
               <div className="text-sm text-slate-300">Sales Profit Margin Approval</div>
             </div>
           </div>
@@ -55,7 +55,7 @@ export default function Login() {
             E-posta ve WhatsApp karmaşasına son. Arçelik, Bellona, Mondi mağazalarınız için merkezi, denetlenebilir ve hızlı onay süreci.
           </p>
         </div>
-        <div className="relative z-10 text-xs text-slate-400">© 2026 Margin CRM</div>
+        <div className="relative z-10 text-xs text-slate-400">© 2026 Gürses CRM</div>
       </div>
 
       <div className="flex-1 flex items-center justify-center p-8 bg-[#F8FAFC]">

@@ -27,7 +27,7 @@ export default function Layout() {
               <ShieldCheck className="w-5 h-5" strokeWidth={1.5} />
             </div>
             <div>
-              <div className="font-heading font-semibold text-sm tracking-tight">Margin CRM</div>
+              <div className="font-heading font-semibold text-sm tracking-tight">Gürses CRM</div>
               <div className="text-xs text-slate-500">Onay Sistemi</div>
             </div>
           </div>
