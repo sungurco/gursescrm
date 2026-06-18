@@ -215,4 +215,17 @@ def test_create_user(tokens):
     email = f'TEST_{_u.uuid4().hex[:8]}@x.com'
     r = requests.post(f'{BASE}/users', headers=H(tok),
                      json={'email':email,'password':'Pwd123!','name':'TEST User','role':'store_user'}, timeout=15)
-    assert r.status_code == 200 and r.json()['email']==email
+    assert r.status_code == 200 and r.json()['email']==email.lower()
+
+# ---- File download RBAC across stores ----
+def test_download_file_cross_store_forbidden(tokens, new_request):
+    tok_a,_ = tokens['arcelik']
+    png = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000101a5f645400000000049454e44ae426082')
+    up = requests.post(f'{BASE}/requests/{new_request["id"]}/files',
+                       headers=H(tok_a), files={'file':('t.png', png, 'image/png')}, timeout=60)
+    if up.status_code != 200:
+        pytest.skip('storage unavailable')
+    fid = up.json()['id']
+    tok_b,_ = tokens['bellona']
+    r = requests.get(f'{BASE}/requests/{new_request["id"]}/files/{fid}?auth={tok_b}', timeout=30)
+    assert r.status_code == 403

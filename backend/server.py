@@ -264,9 +264,10 @@ async def list_brands(user: dict = Depends(get_current_user)):
 
 @api.post("/brands")
 async def upsert_brand(payload: BrandIn, user: dict = Depends(require_roles("it_admin", "manager"))):
-    bid = payload.name.lower().strip()
+    # use name as canonical id to match seed
+    bid = payload.name
     doc = {"id": bid, "name": payload.name, "min_profit_pct": payload.min_profit_pct}
-    await db.brands.update_one({"id": bid}, {"$set": doc}, upsert=True)
+    await db.brands.update_one({"name": payload.name}, {"$set": doc}, upsert=True)
     await log_audit(user, "upsert_brand", "brand", bid, {"min_profit_pct": payload.min_profit_pct})
     return doc
 
@@ -333,7 +334,7 @@ async def create_request(payload: RequestIn, user: dict = Depends(get_current_us
     store = await db.stores.find_one({"id": payload.store_id}, {"_id": 0})
     if not store:
         raise HTTPException(status_code=400, detail="Store not found")
-    brand = await db.brands.find_one({"id": store["brand"].lower()}, {"_id": 0})
+    brand = await db.brands.find_one({"name": store["brand"]}, {"_id": 0})
     min_pct = brand["min_profit_pct"] if brand else 0.0
     profit = payload.total_amount - payload.cost_amount
     profit_pct = (profit / payload.total_amount * 100) if payload.total_amount > 0 else 0
@@ -392,11 +393,12 @@ async def list_requests(
     date_to: Optional[str] = None,
 ):
     q = {}
-    if user["role"] == "store_user" and user.get("store_id"):
-        q["store_id"] = user["store_id"]
     if status: q["status"] = status
     if store_id: q["store_id"] = store_id
     if brand: q["brand"] = brand
+    # Enforce store scope for store_user AFTER user-provided filters
+    if user["role"] == "store_user" and user.get("store_id"):
+        q["store_id"] = user["store_id"]
     if assigned_to:
         q["assigned_to"] = None if assigned_to == "unassigned" else assigned_to
     if date_from or date_to:
@@ -548,7 +550,6 @@ async def upload_file(rid: str, file: UploadFile = File(...), user: dict = Depen
 async def download_file(rid: str, fid: str, request: Request,
                         authorization: Optional[str] = Header(None),
                         auth: Optional[str] = Query(None)):
-    # Allow query param token for img tags
     token = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
@@ -559,12 +560,17 @@ async def download_file(rid: str, fid: str, request: Request,
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[JWT_ALG])
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[JWT_ALG])
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"], "is_active": True}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
     r = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
+    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     f = next((x for x in r.get("files", []) if x["id"] == fid), None)
     if not f:
         raise HTTPException(status_code=404, detail="File not found")
@@ -633,12 +639,14 @@ app.add_middleware(
 async def seed_initial_data():
     # Brands
     default_brands = [
-        {"id": "arcelik", "name": "Arçelik", "min_profit_pct": 15.0},
-        {"id": "bellona", "name": "Bellona", "min_profit_pct": 12.0},
-        {"id": "mondi", "name": "Mondi", "min_profit_pct": 13.0},
+        {"id": "Arçelik", "name": "Arçelik", "min_profit_pct": 15.0},
+        {"id": "Bellona", "name": "Bellona", "min_profit_pct": 12.0},
+        {"id": "Mondi", "name": "Mondi", "min_profit_pct": 13.0},
     ]
     for b in default_brands:
-        await db.brands.update_one({"id": b["id"]}, {"$setOnInsert": b}, upsert=True)
+        await db.brands.update_one({"name": b["name"]}, {"$set": b}, upsert=True)
+    # Remove legacy lowercase ids if any exist from earlier seeds
+    await db.brands.delete_many({"id": {"$in": ["arcelik", "bellona", "mondi"]}, "name": {"$nin": ["Arçelik", "Bellona", "Mondi"]}})
 
     # Stores
     default_stores = [

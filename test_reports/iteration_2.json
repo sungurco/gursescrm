@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 re-test after main agent fixes: brand lookup, scope enforcement order, file download RBAC. All 23 backend tests pass (was 14/22 in iter_1). Frontend UI testing also verified: login + 4 admin pages render, store user can access request create form, Kanban shows exactly 5 columns with 7 cards, approval user can claim -> release-btn appears, lock semantics correct.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "RequestCreate", "issues": ["Form input fields (sales_number, customer_name, total/cost amount, reason, etc.) lack data-testid attributes; only mağaza select uses one. Recommend adding for testability."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_crm.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional: add data-testid attrs to RequestCreate form inputs for better playwright coverage (low priority)."
+  ],
+  "critical_code_review_comments": [
+    "CORS allow_credentials=False but the app also relies on httpOnly cookies for auth — fine since frontend uses Bearer header. Just be aware cookie-based auth from a different origin will not work.",
+    "list_requests scope ordering now correctly enforces store_user.store_id AFTER user-provided filters (server.py:399-401). Verified by test_store_user_sees_only_own.",
+    "Brand lookup in create_request uses store['brand'] string match against db.brands.name (server.py:337). Works for non-ASCII 'Arçelik'. Verified min_profit_pct=15.0 in test fixture new_request.",
+    "download_file now reloads user from DB and enforces store_user store scope (server.py:566-573). Verified by new test_download_file_cross_store_forbidden."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crm.py (fixed test_create_user uppercase email assertion; added test_download_file_cross_store_forbidden)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% on tested flows"},
+  "test_credentials": "All 7 seed accounts from /app/memory/test_credentials.md verified working.",
+  "seed_data_creation": "Used existing seed data (sample requests + brands + stores + users). Created TEST_ prefixed requests/users during tests; not cleaned up but harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite at /app/backend/tests/test_crm.py is comprehensive (23 tests covering auth, dashboard, request CRUD, claim-lock concurrency with Turkish error, RBAC for users/brands/cross-store, file upload/download cross-store, audit). For frontend, use [data-testid=\"quick-admin/manager/approval/store\"] then login-submit-btn. Kanban has [data-testid^=\"kanban-col-\"] and [data-testid^=\"kanban-card-\"]. RequestDetail has claim-btn, release-btn, locked-by (shown only to non-assignee).",
+  "rca_of_the_issue": "Iter_1 issues resolved: (1) brand lookup string-id mismatch fixed by switching to {name:store['brand']} match (server.py:337); (2) min_profit_pct=15.0 confirmed in tests; (3) list_requests scope precedence fixed; (4) download_file RBAC added."
+}
