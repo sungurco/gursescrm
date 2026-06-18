@@ -3,9 +3,9 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Cache deps
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+# Cache deps. yarn.lock* glob allows build to succeed if lockfile is missing
+COPY package.json yarn.lock* ./
+RUN yarn install --network-timeout 600000
 
 # Build app
 COPY . .
