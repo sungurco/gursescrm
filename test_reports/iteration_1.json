@@ -1,0 +1,49 @@
+{
+  "summary": "Backend pytest suite executed (22 tests). 14 passed, 1 failed (test bug), 7 errored - all 7 errors are downstream of one real backend bug: brand lookup fails for stores whose brand name contains non-ASCII chars (Arçelik) causing min_profit_pct=0.0 instead of 15.0. Core auth, dashboard, list/filter, RBAC, audit, claim/release endpoints code is reachable but couldn't fully validate claim concurrency because the request-creation fixture aborted on the assertion. Frontend UI was NOT tested in this iteration due to limited budget after backend bug discovery; needs follow-up.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/requests",
+        "issue": "min_profit_pct returned as 0.0 instead of brand's configured value (15.0 for Arçelik). Root cause: server.py line 336 does `db.brands.find_one({'id': store['brand'].lower()})`. Stores are seeded with brand='Arçelik'. 'Arçelik'.lower() => 'arçelik' (with ç), but brand seed inserts id='arcelik' (ASCII). The id lookup never matches for Arçelik (and likely any brand with non-ASCII chars). Affects profit margin enforcement - the core business rule.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crm.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix brand lookup in POST /api/requests. Change server.py line 336 from `store['brand'].lower()` to lookup by name (e.g. `db.brands.find_one({'name': store['brand']})`) OR normalize brand id consistently (e.g. unidecode/slugify) for both seed_initial_data and upsert_brand. Re-test all request-creation flows once fixed.",
+    "After fix, re-run /app/backend/tests/test_crm.py to validate claim concurrency lock (the core 'Talebi Üzerime Al' requirement) which couldn't be fully exercised this round because the fixture aborted.",
+    "Run frontend Playwright tests (login flows, kanban, claim/release/approve buttons, lock message for second approval user, /users, /stores, /settings, /audit admin pages) - not executed this iteration."
+  ],
+  "critical_code_review_comments": [
+    "server.py: Brand id derivation inconsistent — seed_initial_data hardcodes ASCII ids ('arcelik','bellona','mondi') but upsert_brand uses payload.name.lower().strip() which would store 'arçelik' for non-ASCII. Lookups using store['brand'].lower() therefore fail. Use a single slugify helper everywhere.",
+    "server.py: Single 750-line monolith — should be split into routers/auth/models/storage modules for maintainability (>700 lines guideline).",
+    "server.py: CORS allow_credentials=False but login also sets httponly cookie — cookie auth is effectively unusable cross-origin. Either enable credentials with explicit origins, or remove cookie code to reduce confusion.",
+    "server.py: change_status allows manager/it_admin to set any status without claim ownership check — verify this is intended. Also no validation that approved/rejected can't be re-changed.",
+    "server.py: download_file decodes JWT but does NOT load user / check is_active or RBAC against the request's store_id — any valid token can download any file by guessing rid/fid. Should reuse get_current_user + store_user scoping.",
+    "server.py: list_requests stores filter `q['store_id']` could be overridden by query param `store_id` for store_user role since the explicit filter comes first then is overwritten."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crm.py"
+  ],
+  "success_rate": {
+    "backend": "64% (14/22 pass; 7 errors blocked by 1 root cause; 1 test assertion off)",
+    "frontend": "not tested"
+  },
+  "test_credentials": "Verified all 7 seeded accounts log in successfully (admin/manager/approval/approval2/arcelik/bellona/mondi).",
+  "seed_data_creation": "Seed data verified present (3 brands, 3 stores, 7 users, 4 sample requests). No additional seed created. Test data uses TEST_ prefix for sales_number/customer.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend bug at server.py:336 (brand lookup with non-ASCII) is the single root cause for 7 errored tests. After main agent fixes, re-run `pytest /app/backend/tests/test_crm.py -v`. test_create_user assertion compares uppercase TEST_ but backend lowercases email — change to email.lower() comparison or generate lowercase test_ prefix. THEN run Playwright frontend tests focusing on: (1) login with all 4 quick-login buttons, (2) store user creates request via /requests/new, (3) approval user claims request -> button toggles to release-btn + approve/reject/info appear, (4) login as approval2 in incognito/separate context to see locked-by message data-testid='locked-by', (5) /audit page renders for admin.",
+  "rca of the issue": "POST /api/requests calls `db.brands.find_one({'id': store['brand'].lower()})`. Seeded stores have brand='Arçelik' (with U+00E7 ç). `'Arçelik'.lower()` yields `'arçelik'` whereas the seeded brand document has id='arcelik' (ASCII, hardcoded in seed_initial_data dict). Mongo find returns None → `min_pct = 0.0`. Reproduction: POST /api/requests as arcelik@crm.local with any payload → response.min_profit_pct == 0.0. Mitigation: replace lookup with `db.brands.find_one({'name': store['brand']})` (exact match on display name) OR introduce a slugify(name) helper used consistently in both seed and upsert_brand and at lookup. Re-seed/upsert brands to align ids if changing the slug scheme."
+}

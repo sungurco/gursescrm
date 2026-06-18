@@ -1,89 +1,750 @@
-from fastapi import FastAPI, APIRouter
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+import os
+import uuid
+import logging
+import requests
+import bcrypt
+import jwt
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Literal
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Form, Query, Header
+from fastapi.responses import Response as FastAPIResponse
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
+
+# -------------------- DB --------------------
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
-app = FastAPI()
+# -------------------- App --------------------
+app = FastAPI(title="Sales Margin Approval CRM")
+api = APIRouter(prefix="/api")
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
+# -------------------- Constants --------------------
+JWT_ALG = "HS256"
+ROLES = ["store_user", "approval_user", "manager", "it_admin"]
+STATUSES = ["new", "in_review", "waiting_info", "approved", "rejected", "cancelled"]
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# -------------------- Auth Helpers --------------------
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+def verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+def create_access_token(uid: str, email: str, role: str) -> str:
+    payload = {
+        "sub": uid, "email": email, "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=12),
+        "type": "access",
+    }
+    return jwt.encode(payload, os.environ["JWT_SECRET"], algorithm=JWT_ALG)
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[JWT_ALG])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"], "is_active": True}, {"password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    user.pop("_id", None)
+    return user
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+def require_roles(*allowed):
+    async def checker(user: dict = Depends(get_current_user)):
+        if user["role"] not in allowed:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return checker
 
-# Include the router in the main app
-app.include_router(api_router)
+# -------------------- Object Storage --------------------
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = os.environ.get("APP_NAME", "margincrm")
+_storage_key = {"value": None}
+
+def init_storage():
+    if _storage_key["value"]:
+        return _storage_key["value"]
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+        resp.raise_for_status()
+        _storage_key["value"] = resp.json()["storage_key"]
+        logger.info("Storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
+        raise
+    return _storage_key["value"]
+
+def put_object(path: str, data: bytes, content_type: str):
+    key = init_storage()
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data, timeout=120,
+    )
+    if resp.status_code == 403:
+        _storage_key["value"] = None
+        key = init_storage()
+        resp = requests.put(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key, "Content-Type": content_type},
+            data=data, timeout=120,
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+def get_object(path: str):
+    key = init_storage()
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    if resp.status_code == 403:
+        _storage_key["value"] = None
+        key = init_storage()
+        resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+# -------------------- Audit --------------------
+async def log_audit(user: dict, action: str, target_type: str = "", target_id: str = "", meta: dict = None):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.get("id"),
+        "user_email": user.get("email"),
+        "user_name": user.get("name"),
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "meta": meta or {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.audit_logs.insert_one(doc)
+
+# -------------------- Models --------------------
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+class UserCreateIn(BaseModel):
+    email: str
+    password: str
+    name: str
+    role: Literal["store_user", "approval_user", "manager", "it_admin"]
+    store_id: Optional[str] = None
+    phone: Optional[str] = None
+
+class UserUpdateIn(BaseModel):
+    name: Optional[str] = None
+    role: Optional[Literal["store_user", "approval_user", "manager", "it_admin"]] = None
+    store_id: Optional[str] = None
+    phone: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+class StoreIn(BaseModel):
+    name: str
+    code: str
+    brand: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+
+class BrandIn(BaseModel):
+    name: str
+    min_profit_pct: float
+
+class RequestIn(BaseModel):
+    store_id: str
+    sales_number: str
+    customer_name: str
+    customer_phone: str
+    sale_date: str
+    product_info: str
+    total_amount: float
+    cost_amount: float
+    reason: str
+    additional_notes: Optional[str] = ""
+
+class RequestUpdateIn(BaseModel):
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    sale_date: Optional[str] = None
+    product_info: Optional[str] = None
+    total_amount: Optional[float] = None
+    cost_amount: Optional[float] = None
+    reason: Optional[str] = None
+    additional_notes: Optional[str] = None
+
+class CommentIn(BaseModel):
+    text: str
+
+class StatusChangeIn(BaseModel):
+    status: Literal["new", "in_review", "waiting_info", "approved", "rejected", "cancelled"]
+    comment: Optional[str] = ""
+
+# -------------------- Auth Routes --------------------
+@api.post("/auth/login")
+async def login(payload: LoginIn, response: Response):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="User is deactivated")
+    token = create_access_token(user["id"], user["email"], user["role"])
+    response.set_cookie("access_token", token, httponly=True, secure=False, samesite="lax", max_age=43200, path="/")
+    await log_audit(user, "login", "auth", user["id"])
+    user.pop("password_hash", None)
+    user.pop("_id", None)
+    return {"user": user, "token": token}
+
+@api.post("/auth/logout")
+async def logout(response: Response, user: dict = Depends(get_current_user)):
+    response.delete_cookie("access_token", path="/")
+    await log_audit(user, "logout", "auth", user["id"])
+    return {"ok": True}
+
+@api.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return user
+
+# -------------------- Stores --------------------
+@api.get("/stores")
+async def list_stores(user: dict = Depends(get_current_user)):
+    stores = await db.stores.find({}, {"_id": 0}).to_list(1000)
+    return stores
+
+@api.post("/stores")
+async def create_store(payload: StoreIn, user: dict = Depends(require_roles("it_admin", "manager"))):
+    sid = str(uuid.uuid4())
+    doc = {"id": sid, **payload.model_dump(), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.stores.insert_one(doc)
+    await log_audit(user, "create_store", "store", sid, {"name": payload.name})
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/stores/{store_id}")
+async def update_store(store_id: str, payload: StoreIn, user: dict = Depends(require_roles("it_admin", "manager"))):
+    res = await db.stores.update_one({"id": store_id}, {"$set": payload.model_dump()})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Store not found")
+    await log_audit(user, "update_store", "store", store_id)
+    return {"ok": True}
+
+@api.delete("/stores/{store_id}")
+async def delete_store(store_id: str, user: dict = Depends(require_roles("it_admin"))):
+    await db.stores.delete_one({"id": store_id})
+    await log_audit(user, "delete_store", "store", store_id)
+    return {"ok": True}
+
+# -------------------- Brands --------------------
+@api.get("/brands")
+async def list_brands(user: dict = Depends(get_current_user)):
+    return await db.brands.find({}, {"_id": 0}).to_list(1000)
+
+@api.post("/brands")
+async def upsert_brand(payload: BrandIn, user: dict = Depends(require_roles("it_admin", "manager"))):
+    bid = payload.name.lower().strip()
+    doc = {"id": bid, "name": payload.name, "min_profit_pct": payload.min_profit_pct}
+    await db.brands.update_one({"id": bid}, {"$set": doc}, upsert=True)
+    await log_audit(user, "upsert_brand", "brand", bid, {"min_profit_pct": payload.min_profit_pct})
+    return doc
+
+@api.delete("/brands/{brand_id}")
+async def delete_brand(brand_id: str, user: dict = Depends(require_roles("it_admin"))):
+    await db.brands.delete_one({"id": brand_id})
+    await log_audit(user, "delete_brand", "brand", brand_id)
+    return {"ok": True}
+
+# -------------------- Users --------------------
+@api.get("/users")
+async def list_users(user: dict = Depends(require_roles("it_admin", "manager"))):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    return users
+
+@api.post("/users")
+async def create_user(payload: UserCreateIn, user: dict = Depends(require_roles("it_admin"))):
+    email = payload.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    uid = str(uuid.uuid4())
+    doc = {
+        "id": uid, "email": email, "password_hash": hash_password(payload.password),
+        "name": payload.name, "role": payload.role, "store_id": payload.store_id,
+        "phone": payload.phone, "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    await log_audit(user, "create_user", "user", uid, {"email": email, "role": payload.role})
+    doc.pop("password_hash", None); doc.pop("_id", None)
+    return doc
+
+@api.put("/users/{uid}")
+async def update_user(uid: str, payload: UserUpdateIn, user: dict = Depends(require_roles("it_admin"))):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "password" in updates:
+        updates["password_hash"] = hash_password(updates.pop("password"))
+    res = await db.users.update_one({"id": uid}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await log_audit(user, "update_user", "user", uid, {"changed": list(updates.keys())})
+    return {"ok": True}
+
+@api.delete("/users/{uid}")
+async def delete_user(uid: str, user: dict = Depends(require_roles("it_admin"))):
+    if uid == user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    await db.users.delete_one({"id": uid})
+    await log_audit(user, "delete_user", "user", uid)
+    return {"ok": True}
+
+# -------------------- Approval Requests --------------------
+async def _next_request_number():
+    counter = await db.counters.find_one_and_update(
+        {"_id": "request_seq"}, {"$inc": {"value": 1}}, upsert=True, return_document=True
+    )
+    val = counter["value"] if counter else 1
+    return f"REQ-{datetime.now(timezone.utc).strftime('%Y%m')}-{val:05d}"
+
+@api.post("/requests")
+async def create_request(payload: RequestIn, user: dict = Depends(get_current_user)):
+    if user["role"] not in ("store_user", "it_admin", "manager"):
+        raise HTTPException(status_code=403, detail="Only store users can create requests")
+    store = await db.stores.find_one({"id": payload.store_id}, {"_id": 0})
+    if not store:
+        raise HTTPException(status_code=400, detail="Store not found")
+    brand = await db.brands.find_one({"id": store["brand"].lower()}, {"_id": 0})
+    min_pct = brand["min_profit_pct"] if brand else 0.0
+    profit = payload.total_amount - payload.cost_amount
+    profit_pct = (profit / payload.total_amount * 100) if payload.total_amount > 0 else 0
+    rid = str(uuid.uuid4())
+    req_no = await _next_request_number()
+    doc = {
+        "id": rid,
+        "request_no": req_no,
+        "store_id": store["id"],
+        "store_name": store["name"],
+        "store_code": store["code"],
+        "brand": store["brand"],
+        "sales_number": payload.sales_number,
+        "customer_name": payload.customer_name,
+        "customer_phone": payload.customer_phone,
+        "sale_date": payload.sale_date,
+        "product_info": payload.product_info,
+        "total_amount": payload.total_amount,
+        "cost_amount": payload.cost_amount,
+        "profit_amount": profit,
+        "profit_pct": round(profit_pct, 2),
+        "min_profit_pct": min_pct,
+        "reason": payload.reason,
+        "additional_notes": payload.additional_notes or "",
+        "status": "new",
+        "assigned_to": None,
+        "assigned_to_name": None,
+        "assigned_at": None,
+        "decided_at": None,
+        "decided_by": None,
+        "files": [],
+        "comments": [],
+        "history": [{
+            "status": "new", "at": datetime.now(timezone.utc).isoformat(),
+            "by": user["id"], "by_name": user["name"], "comment": "Talep oluşturuldu"
+        }],
+        "created_by": user["id"],
+        "created_by_name": user["name"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.requests.insert_one(doc)
+    await log_audit(user, "create_request", "request", rid, {"request_no": req_no})
+    doc.pop("_id", None)
+    return doc
+
+@api.get("/requests")
+async def list_requests(
+    user: dict = Depends(get_current_user),
+    status: Optional[str] = None,
+    store_id: Optional[str] = None,
+    brand: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    q = {}
+    if user["role"] == "store_user" and user.get("store_id"):
+        q["store_id"] = user["store_id"]
+    if status: q["status"] = status
+    if store_id: q["store_id"] = store_id
+    if brand: q["brand"] = brand
+    if assigned_to:
+        q["assigned_to"] = None if assigned_to == "unassigned" else assigned_to
+    if date_from or date_to:
+        q["created_at"] = {}
+        if date_from: q["created_at"]["$gte"] = date_from
+        if date_to: q["created_at"]["$lte"] = date_to + "T23:59:59Z"
+    if search:
+        s = search.strip()
+        q["$or"] = [
+            {"request_no": {"$regex": s, "$options": "i"}},
+            {"sales_number": {"$regex": s, "$options": "i"}},
+            {"customer_name": {"$regex": s, "$options": "i"}},
+            {"customer_phone": {"$regex": s, "$options": "i"}},
+        ]
+    items = await db.requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return items
+
+@api.get("/requests/{rid}")
+async def get_request(rid: str, user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return r
+
+@api.post("/requests/{rid}/claim")
+async def claim_request(rid: str, user: dict = Depends(require_roles("approval_user", "it_admin"))):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if r.get("assigned_to") and r["assigned_to"] != user["id"]:
+        raise HTTPException(status_code=409, detail=f"Talep zaten {r.get('assigned_to_name')} tarafından alındı")
+    if r["status"] in ("approved", "rejected", "cancelled"):
+        raise HTTPException(status_code=400, detail="Talep zaten tamamlanmış")
+    now = datetime.now(timezone.utc).isoformat()
+    new_status = "in_review" if r["status"] == "new" else r["status"]
+    await db.requests.update_one({"id": rid, "$or": [{"assigned_to": None}, {"assigned_to": user["id"]}]}, {
+        "$set": {"assigned_to": user["id"], "assigned_to_name": user["name"],
+                 "assigned_at": now, "status": new_status, "updated_at": now},
+        "$push": {"history": {"status": new_status, "at": now, "by": user["id"],
+                              "by_name": user["name"], "comment": "Talep üstlenildi"}}
+    })
+    await log_audit(user, "claim_request", "request", rid)
+    r2 = await db.requests.find_one({"id": rid}, {"_id": 0})
+    return r2
+
+@api.post("/requests/{rid}/release")
+async def release_request(rid: str, user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if r.get("assigned_to") != user["id"] and user["role"] != "it_admin":
+        raise HTTPException(status_code=403, detail="Sadece talebi alan kullanıcı serbest bırakabilir")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.requests.update_one({"id": rid}, {
+        "$set": {"assigned_to": None, "assigned_to_name": None, "assigned_at": None,
+                 "status": "new", "updated_at": now},
+        "$push": {"history": {"status": "new", "at": now, "by": user["id"],
+                              "by_name": user["name"], "comment": "Talep serbest bırakıldı"}}
+    })
+    await log_audit(user, "release_request", "request", rid)
+    return await db.requests.find_one({"id": rid}, {"_id": 0})
+
+@api.post("/requests/{rid}/status")
+async def change_status(rid: str, payload: StatusChangeIn, user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    # permissions
+    if user["role"] == "store_user":
+        if payload.status != "cancelled" or r["store_id"] != user.get("store_id"):
+            raise HTTPException(status_code=403, detail="Sadece kendi talebinizi iptal edebilirsiniz")
+    elif user["role"] in ("approval_user",):
+        if r.get("assigned_to") != user["id"]:
+            raise HTTPException(status_code=403, detail="Önce talebi üzerinize almalısınız")
+    elif user["role"] not in ("it_admin", "manager"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"status": payload.status, "updated_at": now}
+    if payload.status in ("approved", "rejected"):
+        update["decided_at"] = now
+        update["decided_by"] = user["id"]
+    history_entry = {"status": payload.status, "at": now, "by": user["id"],
+                     "by_name": user["name"], "comment": payload.comment or ""}
+    await db.requests.update_one({"id": rid}, {"$set": update, "$push": {"history": history_entry}})
+    await log_audit(user, f"status_{payload.status}", "request", rid, {"comment": payload.comment})
+    return await db.requests.find_one({"id": rid}, {"_id": 0})
+
+@api.post("/requests/{rid}/comments")
+async def add_comment(rid: str, payload: CommentIn, user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    comment = {
+        "id": str(uuid.uuid4()), "text": payload.text,
+        "by": user["id"], "by_name": user["name"], "by_role": user["role"],
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.requests.update_one({"id": rid}, {
+        "$push": {"comments": comment},
+        "$set": {"updated_at": comment["at"]}
+    })
+    await log_audit(user, "add_comment", "request", rid)
+    return comment
+
+# -------------------- Files --------------------
+MIME_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "pdf": "application/pdf"}
+
+@api.post("/requests/{rid}/files")
+async def upload_file(rid: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
+    if ext not in MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Sadece JPG, PNG, PDF dosyaları yükleyebilirsiniz")
+    content_type = MIME_TYPES[ext]
+    fid = str(uuid.uuid4())
+    path = f"{APP_NAME}/requests/{rid}/{fid}.{ext}"
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Dosya 10MB'tan büyük olamaz")
+    try:
+        result = put_object(path, data, content_type)
+    except Exception as e:
+        logger.error(f"upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Dosya yükleme başarısız")
+    file_doc = {
+        "id": fid,
+        "storage_path": result["path"],
+        "original_filename": file.filename,
+        "content_type": content_type,
+        "size": result.get("size", len(data)),
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user["name"],
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.requests.update_one({"id": rid}, {"$push": {"files": file_doc}})
+    await log_audit(user, "upload_file", "request", rid, {"filename": file.filename})
+    return file_doc
+
+@api.get("/requests/{rid}/files/{fid}")
+async def download_file(rid: str, fid: str, request: Request,
+                        authorization: Optional[str] = Header(None),
+                        auth: Optional[str] = Query(None)):
+    # Allow query param token for img tags
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    elif auth:
+        token = auth
+    elif request.cookies.get("access_token"):
+        token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        jwt.decode(token, os.environ["JWT_SECRET"], algorithms=[JWT_ALG])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    r = await db.requests.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    f = next((x for x in r.get("files", []) if x["id"] == fid), None)
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    data, ct = get_object(f["storage_path"])
+    return FastAPIResponse(content=data, media_type=f.get("content_type", ct))
+
+# -------------------- Dashboard --------------------
+@api.get("/dashboard")
+async def dashboard(user: dict = Depends(get_current_user)):
+    base_q = {}
+    if user["role"] == "store_user" and user.get("store_id"):
+        base_q["store_id"] = user["store_id"]
+    counts = {}
+    for s in STATUSES:
+        counts[s] = await db.requests.count_documents({**base_q, "status": s})
+    counts["total"] = await db.requests.count_documents(base_q)
+
+    # Avg approval time
+    approved = await db.requests.find({**base_q, "status": "approved", "decided_at": {"$ne": None}},
+                                       {"_id": 0, "created_at": 1, "decided_at": 1}).to_list(1000)
+    avg_hours = 0
+    if approved:
+        deltas = []
+        for r in approved:
+            try:
+                c = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+                d = datetime.fromisoformat(r["decided_at"].replace("Z", "+00:00"))
+                deltas.append((d - c).total_seconds() / 3600)
+            except Exception:
+                pass
+        if deltas:
+            avg_hours = round(sum(deltas) / len(deltas), 1)
+
+    result = {"counts": counts, "avg_approval_hours": avg_hours}
+
+    if user["role"] in ("approval_user", "it_admin", "manager"):
+        result["my_assigned"] = await db.requests.count_documents({"assigned_to": user["id"],
+                                                                    "status": {"$nin": ["approved", "rejected", "cancelled"]}})
+        result["unassigned"] = await db.requests.count_documents({"assigned_to": None,
+                                                                   "status": {"$in": ["new"]}})
+
+    # Recent
+    result["recent"] = await db.requests.find(base_q, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
+    return result
+
+# -------------------- Audit Log --------------------
+@api.get("/audit-logs")
+async def audit_logs(user: dict = Depends(require_roles("it_admin", "manager")),
+                     limit: int = 200, action: Optional[str] = None):
+    q = {}
+    if action: q["action"] = action
+    return await db.audit_logs.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+
+# -------------------- Mount --------------------
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=False,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# -------------------- Startup: Indexes, Seed, Storage --------------------
+async def seed_initial_data():
+    # Brands
+    default_brands = [
+        {"id": "arcelik", "name": "Arçelik", "min_profit_pct": 15.0},
+        {"id": "bellona", "name": "Bellona", "min_profit_pct": 12.0},
+        {"id": "mondi", "name": "Mondi", "min_profit_pct": 13.0},
+    ]
+    for b in default_brands:
+        await db.brands.update_one({"id": b["id"]}, {"$setOnInsert": b}, upsert=True)
+
+    # Stores
+    default_stores = [
+        {"name": "Arçelik Kadıköy", "code": "ARC-KDK-01", "brand": "Arçelik", "address": "Kadıköy, İstanbul", "phone": "+90 216 000 0001"},
+        {"name": "Bellona Merkez", "code": "BEL-MRK-01", "brand": "Bellona", "address": "Kavaklıdere, Ankara", "phone": "+90 312 000 0002"},
+        {"name": "Mondi Şube", "code": "MON-SUB-01", "brand": "Mondi", "address": "Karşıyaka, İzmir", "phone": "+90 232 000 0003"},
+    ]
+    store_ids = {}
+    for s in default_stores:
+        existing = await db.stores.find_one({"code": s["code"]})
+        if existing:
+            store_ids[s["brand"]] = existing["id"]
+        else:
+            sid = str(uuid.uuid4())
+            await db.stores.insert_one({"id": sid, **s, "created_at": datetime.now(timezone.utc).isoformat()})
+            store_ids[s["brand"]] = sid
+
+    # Users
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@crm.local")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
+    seed_users = [
+        {"email": admin_email, "password": admin_password, "name": "IT Admin", "role": "it_admin", "store_id": None},
+        {"email": "manager@crm.local", "password": "Manager123!", "name": "Genel Müdür", "role": "manager", "store_id": None},
+        {"email": "approval@crm.local", "password": "Approval123!", "name": "Onay Personeli", "role": "approval_user", "store_id": None},
+        {"email": "approval2@crm.local", "password": "Approval123!", "name": "Onay Personeli 2", "role": "approval_user", "store_id": None},
+        {"email": "arcelik@crm.local", "password": "Store123!", "name": "Arçelik Kadıköy Sorumlusu", "role": "store_user", "store_id": store_ids.get("Arçelik")},
+        {"email": "bellona@crm.local", "password": "Store123!", "name": "Bellona Merkez Sorumlusu", "role": "store_user", "store_id": store_ids.get("Bellona")},
+        {"email": "mondi@crm.local", "password": "Store123!", "name": "Mondi Şube Sorumlusu", "role": "store_user", "store_id": store_ids.get("Mondi")},
+    ]
+    for u in seed_users:
+        existing = await db.users.find_one({"email": u["email"].lower()})
+        if existing:
+            # Ensure password matches env
+            if not verify_password(u["password"], existing["password_hash"]):
+                await db.users.update_one({"email": u["email"].lower()},
+                                          {"$set": {"password_hash": hash_password(u["password"])}})
+            continue
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": u["email"].lower(),
+            "password_hash": hash_password(u["password"]),
+            "name": u["name"],
+            "role": u["role"],
+            "store_id": u["store_id"],
+            "phone": None,
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Sample requests
+    if await db.requests.count_documents({}) == 0:
+        arcelik_user = await db.users.find_one({"email": "arcelik@crm.local"})
+        bellona_user = await db.users.find_one({"email": "bellona@crm.local"})
+        mondi_user = await db.users.find_one({"email": "mondi@crm.local"})
+        samples = [
+            (arcelik_user, "Arçelik", "ARC-KDK-01", store_ids.get("Arçelik"), "Arçelik Kadıköy",
+             "S-2026-001", "Ahmet Yılmaz", "+90 555 111 2233", "Buzdolabı No-Frost 520L", 24000, 22000, "new"),
+            (bellona_user, "Bellona", "BEL-MRK-01", store_ids.get("Bellona"), "Bellona Merkez",
+             "S-2026-002", "Ayşe Demir", "+90 555 222 3344", "Yatak Odası Takımı", 35000, 32000, "in_review"),
+            (mondi_user, "Mondi", "MON-SUB-01", store_ids.get("Mondi"), "Mondi Şube",
+             "S-2026-003", "Mehmet Kaya", "+90 555 333 4455", "Köşe Takımı", 28000, 25500, "waiting_info"),
+            (arcelik_user, "Arçelik", "ARC-KDK-01", store_ids.get("Arçelik"), "Arçelik Kadıköy",
+             "S-2026-004", "Zeynep Şahin", "+90 555 444 5566", "Çamaşır Makinesi 9kg", 18000, 16500, "approved"),
+        ]
+        for (u, brand, code, sid, sname, sn, cust, phone, prod, total, cost, status) in samples:
+            if not u: continue
+            brand_doc = next((b for b in default_brands if b["name"] == brand), None)
+            min_pct = brand_doc["min_profit_pct"] if brand_doc else 12.0
+            profit = total - cost
+            ppct = round(profit/total*100, 2) if total else 0
+            req_no = await _next_request_number()
+            await db.requests.insert_one({
+                "id": str(uuid.uuid4()),
+                "request_no": req_no,
+                "store_id": sid, "store_name": sname, "store_code": code, "brand": brand,
+                "sales_number": sn, "customer_name": cust, "customer_phone": phone,
+                "sale_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "product_info": prod,
+                "total_amount": total, "cost_amount": cost,
+                "profit_amount": profit, "profit_pct": ppct, "min_profit_pct": min_pct,
+                "reason": "Müşteri pazarlık etti, rekabetçi fiyat verildi.",
+                "additional_notes": "",
+                "status": status, "assigned_to": None, "assigned_to_name": None,
+                "assigned_at": None, "decided_at": None, "decided_by": None,
+                "files": [], "comments": [],
+                "history": [{"status": "new", "at": datetime.now(timezone.utc).isoformat(),
+                             "by": u["id"], "by_name": u["name"], "comment": "Talep oluşturuldu"}],
+                "created_by": u["id"], "created_by_name": u["name"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+@app.on_event("startup")
+async def on_startup():
+    await db.users.create_index("email", unique=True)
+    await db.requests.create_index("status")
+    await db.requests.create_index("store_id")
+    await db.requests.create_index("assigned_to")
+    await db.audit_logs.create_index([("created_at", -1)])
+    try:
+        init_storage()
+    except Exception as e:
+        logger.warning(f"Storage not initialized at startup: {e}")
+    await seed_initial_data()
+    logger.info("Startup complete")
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def on_shutdown():
     client.close()
