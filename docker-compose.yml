@@ -1,0 +1,50 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: gurses_mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - gurses_net
+    # Mongo only exposed inside the docker network. Uncomment to access from host:
+    # ports:
+    #   - "27017:27017"
+
+  backend:
+    build: ./backend
+    container_name: gurses_backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "${DB_NAME:-gurses_crm}"
+      JWT_SECRET: "${JWT_SECRET}"
+      APP_NAME: "${APP_NAME:-gursescrm}"
+      STORAGE_MODE: "local"
+      LOCAL_STORAGE_PATH: "/data/uploads"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+    volumes:
+      - uploads_data:/data/uploads
+    networks:
+      - gurses_net
+
+  frontend:
+    build: ./frontend
+    container_name: gurses_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    networks:
+      - gurses_net
+
+volumes:
+  mongo_data:
+  uploads_data:
+
+networks:
+  gurses_net:
+    driver: bridge

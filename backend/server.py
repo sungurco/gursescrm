@@ -83,9 +83,15 @@ def require_roles(*allowed):
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = os.environ.get("APP_NAME", "margincrm")
+STORAGE_MODE = os.environ.get("STORAGE_MODE", "emergent").lower()  # "emergent" | "local"
+LOCAL_STORAGE_PATH = Path(os.environ.get("LOCAL_STORAGE_PATH", "/data/uploads"))
 _storage_key = {"value": None}
 
 def init_storage():
+    if STORAGE_MODE == "local":
+        LOCAL_STORAGE_PATH.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Local storage initialized at {LOCAL_STORAGE_PATH}")
+        return "local"
     if _storage_key["value"]:
         return _storage_key["value"]
     try:
@@ -99,6 +105,14 @@ def init_storage():
     return _storage_key["value"]
 
 def put_object(path: str, data: bytes, content_type: str):
+    if STORAGE_MODE == "local":
+        init_storage()
+        file_path = LOCAL_STORAGE_PATH / path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(data)
+        meta_path = file_path.with_suffix(file_path.suffix + ".ct")
+        meta_path.write_text(content_type, encoding="utf-8")
+        return {"path": path, "size": len(data)}
     key = init_storage()
     resp = requests.put(
         f"{STORAGE_URL}/objects/{path}",
@@ -117,6 +131,13 @@ def put_object(path: str, data: bytes, content_type: str):
     return resp.json()
 
 def get_object(path: str):
+    if STORAGE_MODE == "local":
+        file_path = LOCAL_STORAGE_PATH / path
+        if not file_path.exists():
+            raise FileNotFoundError(path)
+        meta_path = file_path.with_suffix(file_path.suffix + ".ct")
+        ct = meta_path.read_text(encoding="utf-8").strip() if meta_path.exists() else "application/octet-stream"
+        return file_path.read_bytes(), ct
     key = init_storage()
     resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
     if resp.status_code == 403:
@@ -770,7 +791,7 @@ app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
