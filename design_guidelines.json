@@ -1,0 +1,85 @@
+{
+  "theme": "light",
+  "archetype": "4_swiss_high_contrast",
+  "mood": "Professional, trustworthy, calm, and efficient. B2B Enterprise CRM tailored for retail stores and approval departments.",
+  "colors": {
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "surface_hover": "#F1F5F9",
+    "primary": "#0F172A",
+    "primary_hover": "#1E293B",
+    "text_main": "#020617",
+    "text_muted": "#475569",
+    "border": "#E2E8F0",
+    "status": {
+      "new": {"bg": "#E0F2FE", "text": "#0369A1", "border": "#BAE6FD"},
+      "in_review": {"bg": "#FEF3C7", "text": "#B45309", "border": "#FDE68A"},
+      "waiting_info": {"bg": "#FFEDD5", "text": "#C2410C", "border": "#FED7AA"},
+      "approved": {"bg": "#DCFCE7", "text": "#15803D", "border": "#BBF7D0"},
+      "rejected": {"bg": "#FEE2E2", "text": "#B91C1C", "border": "#FECACA"},
+      "cancelled": {"bg": "#F1F5F9", "text": "#475569", "border": "#E2E8F0"}
+    }
+  },
+  "typography": {
+    "headings": "Work Sans, sans-serif",
+    "body": "IBM Plex Sans, sans-serif",
+    "mono": "IBM Plex Mono, monospace",
+    "rules": [
+      "Use tracking-tight for all headings above text-2xl.",
+      "Never use Inter or default generic fonts.",
+      "Sales ID numbers, margin percentages, currency amounts, and dates MUST use mono font for vertical alignment and numerical legibility."
+    ]
+  },
+  "layout": {
+    "spacing": "Generous spacing. Use p-6 and p-8 for modal/forms to prevent claustrophobia. For dashboards, use tight gaps (gap-4) but internal padding p-4 to p-6.",
+    "radius": "Subtle roundness. Maximum rounded-md or rounded-lg (6px to 8px). Avoid pill shapes for cards.",
+    "shadows": "Minimal. Rely on 1px borders (border-slate-200) instead of heavy drop shadows to create a 'flat, clean' look. Use subtle shadow-sm for floating elements."
+  },
+  "components": {
+    "kanban_board": "Horizontal scrolling container. Columns should have a fixed width (e.g. w-80), background slate-50, and 1px border. Cards should be white, border-border, with hover translate-y-[-2px] and shadow-sm.",
+    "forms": "Use Shadcn Form primitives. Inputs must have clear focus rings (focus:ring-2 focus:ring-slate-900). File uploads should be drag-and-drop zones with dashed borders.",
+    "navigation": "Left sidebar or top navbar with white background, subtle bottom/right border. Active state should have a solid primary left border or background highlight.",
+    "buttons": "Flat, no gradient. Primary is dark slate (#0F172A). Ghost variants for secondary actions."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Stroke width 1.5. Keep it minimalist and line-based."
+  },
+  "image_urls": {
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjB3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODE3OTQxNjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Store User Avatar"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjB3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODE3OTQxNjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Manager Avatar"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1675869940341-d495d49010b5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjB3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODE3OTQxNjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Approval Officer Avatar"
+      }
+    ],
+    "backgrounds": [
+      {
+        "url": "https://images.pexels.com/photos/19599329/pexels-photo-19599329.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Retail appliance store background, ideal for Login page hero section with an overlay."
+      }
+    ],
+    "brand_logos": [
+      {
+        "url": "https://images.pexels.com/photos/15342412/pexels-photo-15342412.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Placeholder minimal logo for brand settings (e.g. Arcelik, Bellona, Mondi representations if actual logos unavailable)."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Use standard HTML+Tailwind for main structure. Use Shadcn components for complex interactions like dialogs, selects, tables, etc.",
+    "Implement light theme by default as per B2B daytime usage rules. Avoid dark mode to prevent clinical/cold feel.",
+    "Prioritize 'data-testid' on all interactive elements: inputs, buttons, kanban cards, and forms.",
+    "Make sure the Kanban board supports horizontal scrolling gracefully. Each column must handle its own vertical scroll if cards exceed screen height.",
+    "Ensure contrast ratio is accessible. Text sizes must follow the typography scale rules (e.g. no huge fonts for dashboard widgets, keep it dense and readable).",
+    "Do not use generic 'Inter'. Ensure the Google fonts 'Work Sans', 'IBM Plex Sans', and 'IBM Plex Mono' are imported and configured in Tailwind.",
+    "Avoid card shadow overload. Rely on 1px borders for defining bounds."
+  ]
+}
