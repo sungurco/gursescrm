@@ -127,16 +127,58 @@ def get_object(path: str):
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 # -------------------- Audit --------------------
+ACTION_LABELS = {
+    "login": "Giriş yaptı",
+    "logout": "Çıkış yaptı",
+    "create_request": "Talep oluşturdu",
+    "update_request": "Talebi düzenledi",
+    "claim_request": "Talebi üstlendi",
+    "release_request": "Talebi serbest bıraktı",
+    "status_new": "Durumu Yeni yaptı",
+    "status_in_review": "Durumu İncelemeye aldı",
+    "status_waiting_info": "Bilgi istedi",
+    "status_approved": "Talebi ONAYLADI",
+    "status_rejected": "Talebi REDDETTİ",
+    "status_cancelled": "Talebi iptal etti",
+    "add_comment": "Yorum ekledi",
+    "upload_file": "Dosya yükledi",
+    "create_user": "Kullanıcı oluşturdu",
+    "update_user": "Kullanıcı bilgisini güncelledi",
+    "delete_user": "Kullanıcı sildi",
+    "create_store": "Mağaza oluşturdu",
+    "update_store": "Mağaza güncelledi",
+    "delete_store": "Mağaza sildi",
+    "upsert_brand": "Marka kâr marjı ayarladı",
+    "delete_brand": "Marka sildi",
+    "update_logo": "Şirket logosunu güncelledi",
+}
+
+def describe_audit(action: str, meta: dict) -> str:
+    base = ACTION_LABELS.get(action, action)
+    parts = [base]
+    if not meta: return base
+    if "request_no" in meta: parts.append(f"({meta['request_no']})")
+    if "email" in meta: parts.append(f"— {meta['email']}")
+    if "role" in meta: parts.append(f"[rol: {meta['role']}]")
+    if "name" in meta: parts.append(f"— {meta['name']}")
+    if "filename" in meta: parts.append(f"— dosya: {meta['filename']}")
+    if "min_profit_pct" in meta: parts.append(f"— min %{meta['min_profit_pct']}")
+    if "comment" in meta and meta["comment"]: parts.append(f'— "{meta["comment"]}"')
+    if "changed" in meta: parts.append(f"— değişen: {', '.join(meta['changed'])}")
+    return " ".join(parts)
+
 async def log_audit(user: dict, action: str, target_type: str = "", target_id: str = "", meta: dict = None):
+    meta = meta or {}
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user.get("id"),
         "user_email": user.get("email"),
         "user_name": user.get("name"),
         "action": action,
+        "description": describe_audit(action, meta),
         "target_type": target_type,
         "target_id": target_id,
-        "meta": meta or {},
+        "meta": meta,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.audit_logs.insert_one(doc)
@@ -177,7 +219,7 @@ class RequestIn(BaseModel):
     store_id: str
     sales_number: str
     customer_name: str
-    customer_phone: str
+    customer_phone: Optional[str] = ""
     sale_date: str
     product_info: str
     total_amount: float
@@ -318,9 +360,35 @@ async def update_user(uid: str, payload: UserUpdateIn, user: dict = Depends(requ
 @api.delete("/users/{uid}")
 async def delete_user(uid: str, user: dict = Depends(require_roles("it_admin"))):
     if uid == user["id"]:
-        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+        raise HTTPException(status_code=400, detail="Kendinizi silemezsiniz")
+    target = await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    # Cascade safety: do NOT delete if user has created requests or been assigned (log integrity)
+    has_requests = await db.requests.count_documents({"$or": [{"created_by": uid}, {"assigned_to": uid}]})
+    if has_requests > 0:
+        raise HTTPException(status_code=400, detail=f"Bu kullanıcı {has_requests} talep ile ilişkili. Silmek yerine pasife alın.")
     await db.users.delete_one({"id": uid})
-    await log_audit(user, "delete_user", "user", uid)
+    await log_audit(user, "delete_user", "user", uid, {"email": target.get("email"), "name": target.get("name")})
+    return {"ok": True}
+
+# -------------------- Settings (Logo) --------------------
+@api.get("/settings/logo")
+async def get_logo(user: dict = Depends(get_current_user)):
+    s = await db.settings.find_one({"id": "company"}, {"_id": 0}) or {}
+    return {"logo_data_url": s.get("logo_data_url", "")}
+
+class LogoIn(BaseModel):
+    logo_data_url: str = ""
+
+@api.put("/settings/logo")
+async def set_logo(payload: LogoIn, user: dict = Depends(require_roles("it_admin"))):
+    if payload.logo_data_url and len(payload.logo_data_url) > 500_000:
+        raise HTTPException(status_code=400, detail="Logo çok büyük (max ~400KB)")
+    await db.settings.update_one({"id": "company"},
+                                  {"$set": {"id": "company", "logo_data_url": payload.logo_data_url}},
+                                  upsert=True)
+    await log_audit(user, "update_logo", "settings", "company")
     return {"ok": True}
 
 # -------------------- Approval Requests --------------------
@@ -344,7 +412,8 @@ async def create_request(payload: RequestIn, user: dict = Depends(get_current_us
     brand = await db.brands.find_one({"name": store["brand"]}, {"_id": 0})
     min_pct = brand["min_profit_pct"] if brand else 0.0
     profit = payload.total_amount - payload.cost_amount
-    profit_pct = (profit / payload.total_amount * 100) if payload.total_amount > 0 else 0
+    # Kâr % = (Kâr / Maliyet) * 100 (markup üzerinden, kullanıcı isteği)
+    profit_pct = (profit / payload.cost_amount * 100) if payload.cost_amount > 0 else 0
     rid = str(uuid.uuid4())
     req_no = await _next_request_number()
     doc = {
@@ -432,6 +501,35 @@ async def get_request(rid: str, user: dict = Depends(get_current_user)):
     if user["role"] == "store_user" and r["store_id"] not in (user.get("store_ids") or []):
         raise HTTPException(status_code=403, detail="Forbidden")
     return r
+
+@api.put("/requests/{rid}")
+async def update_request(rid: str, payload: RequestUpdateIn, user: dict = Depends(get_current_user)):
+    r = await db.requests.find_one({"id": rid})
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    # Only store user (owner store) or it_admin can edit, and only if not assigned/closed
+    if user["role"] == "store_user":
+        if r["store_id"] not in (user.get("store_ids") or []):
+            raise HTTPException(status_code=403, detail="Forbidden")
+    elif user["role"] != "it_admin":
+        raise HTTPException(status_code=403, detail="Sadece talebi oluşturan mağaza veya IT Admin düzenleyebilir")
+    if r.get("assigned_to") and user["role"] != "it_admin":
+        raise HTTPException(status_code=409, detail=f"Talep {r.get('assigned_to_name')} tarafından üstlenildi, düzenlenemez")
+    if r["status"] in ("approved", "rejected", "cancelled"):
+        raise HTTPException(status_code=400, detail="Tamamlanmış talep düzenlenemez")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # Recompute profit
+    new_total = updates.get("total_amount", r["total_amount"])
+    new_cost = updates.get("cost_amount", r["cost_amount"])
+    if "total_amount" in updates or "cost_amount" in updates:
+        profit = new_total - new_cost
+        updates["profit_amount"] = profit
+        updates["profit_pct"] = round((profit / new_cost * 100) if new_cost > 0 else 0, 2)
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.requests.update_one({"id": rid}, {"$set": updates})
+    await log_audit(user, "update_request", "request", rid,
+                    {"request_no": r["request_no"], "changed": list(updates.keys())})
+    return await db.requests.find_one({"id": rid}, {"_id": 0})
 
 @api.post("/requests/{rid}/claim")
 async def claim_request(rid: str, user: dict = Depends(require_roles("approval_user", "it_admin"))):

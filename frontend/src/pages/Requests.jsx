@@ -109,10 +109,16 @@ export default function Requests() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">Sonuç bulunamadı.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">Sonuç bulunamadı.</td></tr>
               )}
-              {items.map(r => (
+              {items.map(r => {
+                const img = (r.files || []).find(f => (f.content_type||"").startsWith("image/"));
+                const thumb = img ? `${api.defaults.baseURL}/requests/${r.id}/files/${img.id}?auth=${localStorage.getItem("token")}` : null;
+                return (
                 <tr key={r.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    {thumb ? <img src={thumb} alt="" className="w-12 h-12 object-cover rounded border border-slate-200" data-testid={`thumb-${r.id}`} /> : <div className="w-12 h-12 rounded border border-slate-100 bg-slate-50" />}
+                  </td>
                   <td className="px-4 py-3"><Link data-testid={`row-${r.id}`} to={`/requests/${r.id}`} className="font-mono font-medium text-slate-900">{r.request_no}</Link></td>
                   <td className="px-4 py-3"><div>{r.store_name}</div><div className="text-xs text-slate-500">{r.brand}</div></td>
                   <td className="px-4 py-3"><div>{r.customer_name}</div><div className="text-xs text-slate-500 font-mono">{r.customer_phone}</div></td>
@@ -131,7 +137,8 @@ export default function Requests() {
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                   <td className="px-4 py-3 text-slate-500 font-mono text-xs">{r.created_at?.slice(0,10)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

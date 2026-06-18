@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, KeyRound, Pencil } from "lucide-react";
 
-const EMPTY = { email:"", password:"", name:"", role:"store_user", store_ids:[] };
+const EMPTY = { email:"", password:"", name:"", role:"store_user", store_ids:[], is_active: true };
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -31,14 +31,14 @@ export default function Users() {
   const openNew = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
   const openEdit = (u) => {
     setEditing(u);
-    setForm({ email: u.email, password: "", name: u.name, role: u.role, store_ids: u.store_ids || [] });
+    setForm({ email: u.email, password: "", name: u.name, role: u.role, store_ids: u.store_ids || [], is_active: u.is_active });
     setOpen(true);
   };
 
   const save = async () => {
     try {
       if (editing) {
-        const payload = { name: form.name, role: form.role, store_ids: form.store_ids };
+        const payload = { name: form.name, role: form.role, store_ids: form.store_ids, is_active: form.is_active };
         if (form.password) payload.password = form.password;
         await api.put(`/users/${editing.id}`, payload);
         toast.success("Kullanıcı güncellendi");
@@ -47,6 +47,16 @@ export default function Users() {
         toast.success("Kullanıcı oluşturuldu");
       }
       setOpen(false); setEditing(null); setForm(EMPTY); load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const deleteUser = async () => {
+    if (!editing) return;
+    if (!window.confirm(`${editing.name} kullanıcısını silmek istediğinize emin misiniz?`)) return;
+    try {
+      await api.delete(`/users/${editing.id}`);
+      toast.success("Kullanıcı silindi");
+      setOpen(false); setEditing(null); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -164,6 +174,21 @@ export default function Users() {
             <Button data-testid="user-save-submit" onClick={save} className="bg-slate-900 hover:bg-slate-800 w-full">
               {editing ? "Kaydet" : "Oluştur"}
             </Button>
+            {editing && (
+              <>
+                <div className="flex items-center justify-between p-3 border border-slate-200 rounded-md">
+                  <div>
+                    <div className="text-sm font-medium">Hesap Aktif</div>
+                    <div className="text-xs text-slate-500">Pasif yapılan kullanıcı sisteme giremez.</div>
+                  </div>
+                  <Switch data-testid="user-active-switch" checked={form.is_active} onCheckedChange={(v)=>setForm({...form, is_active: v})} />
+                </div>
+                <Button data-testid="user-delete-btn" onClick={deleteUser} variant="outline" className="w-full text-rose-600 hover:bg-rose-50 border-rose-200">
+                  Kullanıcıyı Sil
+                </Button>
+                <div className="text-xs text-slate-500 text-center">Talep geçmişi olan kullanıcılar silinemez, sadece pasife alınır.</div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

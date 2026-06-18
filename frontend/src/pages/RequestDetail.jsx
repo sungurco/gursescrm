@@ -45,8 +45,9 @@ export default function RequestDetail() {
   const isMine = r.assigned_to === user.id;
   const isAdmin = user.role === "it_admin";
   const canChangeStatus = isMine || isAdmin;
-  const isStoreOwner = user.role === "store_user" && r.store_id === user.store_id;
+  const isStoreOwner = user.role === "store_user" && (user.store_ids || []).includes(r.store_id);
   const isClosed = ["approved","rejected","cancelled"].includes(r.status);
+  const canEdit = (isStoreOwner || isAdmin) && !r.assigned_to && !isClosed;
 
   const claim = async () => {
     setBusy(true);
@@ -139,6 +140,16 @@ export default function RequestDetail() {
           )}
         </div>
       </div>
+
+      {r.assigned_to && (
+        <div data-testid="assigned-banner" className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 flex items-center gap-3">
+          <UserCheck className="w-5 h-5 text-amber-700" strokeWidth={1.5} />
+          <div className="text-sm">
+            <span className="font-semibold text-amber-900">{r.assigned_to_name}</span>
+            <span className="text-amber-800"> talebi üstlenmiş durumda. Atanan onay personeli olduğu için talep düzenlenemez.</span>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -266,7 +277,22 @@ export default function RequestDetail() {
           {isStoreOwner && !isClosed && (
             <Card className="border-slate-200 shadow-none">
               <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Eylemler</CardTitle></CardHeader>
-              <CardContent>
+              <CardContent className="space-y-2">
+                {canEdit && (
+                  <Button data-testid="edit-request-btn" onClick={async()=>{
+                    const reason = window.prompt("Düşük marj nedeni:", r.reason);
+                    if (reason === null) return;
+                    const notes = window.prompt("Ek notlar:", r.additional_notes || "") || "";
+                    try {
+                      await api.put(`/requests/${id}`, { reason, additional_notes: notes });
+                      toast.success("Talep güncellendi");
+                      load();
+                    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+                  }} variant="outline" className="w-full">Talebi Düzenle</Button>
+                )}
+                {!canEdit && r.assigned_to && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Talep üstlenildi, düzenleme kapalı.</div>
+                )}
                 <Button data-testid="cancel-btn" onClick={()=>changeStatus("cancelled")} variant="outline" className="w-full">Talebi İptal Et</Button>
               </CardContent>
             </Card>

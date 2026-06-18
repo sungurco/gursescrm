@@ -18,9 +18,8 @@ export default function AuditLog() {
               <tr>
                 <th className="text-left px-4 py-3 font-medium">Tarih</th>
                 <th className="text-left px-4 py-3 font-medium">Kullanıcı</th>
-                <th className="text-left px-4 py-3 font-medium">İşlem</th>
+                <th className="text-left px-4 py-3 font-medium">İşlem Detayı</th>
                 <th className="text-left px-4 py-3 font-medium">Hedef</th>
-                <th className="text-left px-4 py-3 font-medium">Detay</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -33,7 +32,7 @@ export default function AuditLog() {
                   <td className="px-4 py-2.5 text-xs text-slate-500 font-mono">{Object.keys(l.meta||{}).length ? JSON.stringify(l.meta) : "—"}</td>
                 </tr>
               ))}
-              {logs.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Kayıt yok.</td></tr>}
+              {logs.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Kayıt yok.</td></tr>}
             </tbody>
           </table>
         </div>

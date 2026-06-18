@@ -96,8 +96,11 @@ export default function RequestCreate() {
                 <Input data-testid="customer-name" required value={form.customer_name} onChange={(e)=>setForm({...form, customer_name: e.target.value})} className="mt-1.5" />
               </div>
               <div>
-                <Label>Müşteri Telefon</Label>
-                <Input data-testid="customer-phone" required value={form.customer_phone} onChange={(e)=>setForm({...form, customer_phone: e.target.value})} className="mt-1.5" />
+                <Label>Müşteri Telefon <span className="text-xs text-slate-400">(opsiyonel)</span></Label>
+                <Input data-testid="customer-phone" value={form.customer_phone} onChange={(e)=>setForm({...form, customer_phone: e.target.value.replace(/[^0-9]/g,'').slice(0,11)})} className="mt-1.5" placeholder="11 haneli (örn: 05551112233)" pattern="[0-9]{11}" />
+                {form.customer_phone && form.customer_phone.length !== 11 && (
+                  <div className="text-xs text-rose-600 mt-1">Telefon 11 haneli olmalıdır.</div>
+                )}
               </div>
               <div>
                 <Label>Satış Tarihi</Label>

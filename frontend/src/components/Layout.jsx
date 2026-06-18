@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ROLE_LABELS } from "@/lib/api";
+import { api, ROLE_LABELS } from "@/lib/api";
 import { LayoutDashboard, ClipboardList, KanbanSquare, ShieldCheck, Users, Store, Settings, ScrollText, LogOut, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -17,15 +18,27 @@ const NAV = [
 export default function Layout() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
+  const [logo, setLogo] = useState("");
+
+  useEffect(() => {
+    const fetchLogo = () => api.get("/settings/logo").then(r => setLogo(r.data.logo_data_url || "")).catch(()=>{});
+    fetchLogo();
+    window.addEventListener("logo-updated", fetchLogo);
+    return () => window.removeEventListener("logo-updated", fetchLogo);
+  }, []);
 
   return (
     <div className="min-h-screen flex bg-[#F8FAFC] text-slate-900">
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-6 py-6 border-b border-slate-200">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-slate-900 text-white flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5" strokeWidth={1.5} />
-            </div>
+            {logo ? (
+              <img src={logo} alt="logo" className="w-8 h-8 object-contain" data-testid="company-logo" />
+            ) : (
+              <div className="w-8 h-8 rounded-md bg-slate-900 text-white flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5" strokeWidth={1.5} />
+              </div>
+            )}
             <div>
               <div className="font-heading font-semibold text-sm tracking-tight">Gürses CRM</div>
               <div className="text-xs text-slate-500">Onay Sistemi</div>
