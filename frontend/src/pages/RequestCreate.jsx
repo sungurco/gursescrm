@@ -120,10 +120,10 @@ export default function RequestCreate() {
                 </Select>
               </div>
             </div>
-            <div>
-              <Label>Ürün Bilgisi</Label>
-              <Textarea data-testid="product-info" required value={form.product_info} onChange={(e)=>setForm({...form, product_info: e.target.value})} rows={2} className="mt-1.5" />
-            </div>
+              <div>
+                <Label>Ürün Bilgisi <span className="text-xs text-slate-400">(opsiyonel)</span></Label>
+                <Textarea data-testid="product-info" value={form.product_info} onChange={(e)=>setForm({...form, product_info: e.target.value})} rows={2} className="mt-1.5" />
+              </div>
           </CardContent>
         </Card>
 

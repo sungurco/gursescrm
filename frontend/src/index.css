@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+table th {
+    resize: horizontal;
+    overflow: auto;
+    min-width: 80px;
+}
+table th, table td {
+    user-select: text;
+}
+
 body {
     margin: 0;
     font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;

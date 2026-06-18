@@ -87,26 +87,9 @@ export default function Settings() {
       )}
 
       <Card className="border-slate-200 shadow-none">
-        <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Markalar — Minimum Kâr %</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          {brands.map((b, i) => (
-            <div key={b.id} data-testid={`brand-${b.id}`} className="flex items-center gap-3 p-3 border border-slate-200 rounded-md">
-              <div className="flex-1 font-medium">{b.name}</div>
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-slate-500">Min Kâr %</Label>
-                <Input data-testid={`brand-pct-${b.id}`} type="number" step="0.1"
-                       value={b.min_profit_pct}
-                       onChange={(e)=>setBrands(brands.map((x,j)=> j===i ? {...x, min_profit_pct: e.target.value} : x))}
-                       className="w-24 font-mono" />
-                <Button data-testid={`brand-save-${b.id}`} size="sm" onClick={()=>save(b)} className="bg-slate-900 hover:bg-slate-800">Kaydet</Button>
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center gap-3 p-3 border border-dashed border-slate-300 rounded-md">
-            <Input data-testid="new-brand-name" placeholder="Yeni marka adı" value={newBrand.name} onChange={(e)=>setNewBrand({...newBrand, name: e.target.value})} className="flex-1" />
-            <Input data-testid="new-brand-pct" type="number" step="0.1" placeholder="Min Kâr %" value={newBrand.min_profit_pct} onChange={(e)=>setNewBrand({...newBrand, min_profit_pct: e.target.value})} className="w-32 font-mono" />
-            <Button data-testid="new-brand-add" onClick={addBrand} className="bg-slate-900 hover:bg-slate-800">Ekle</Button>
-          </div>
+        <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Bilgi</CardTitle></CardHeader>
+        <CardContent>
+          <div className="text-sm text-slate-600">Diğer sistem ayarları ileride bu sayfaya eklenecektir.</div>
         </CardContent>
       </Card>
     </div>

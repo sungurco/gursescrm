@@ -12,7 +12,8 @@ const NAV = [
   { to: "/audit", label: "Denetim Günlüğü", icon: ScrollText, roles: ["it_admin"], testid: "nav-audit" },
   { to: "/users", label: "Kullanıcılar", icon: Users, roles: ["it_admin"], testid: "nav-users" },
   { to: "/stores", label: "Mağazalar", icon: Store, roles: ["it_admin","manager"], testid: "nav-stores" },
-  { to: "/settings", label: "Kâr Marjı Ayarları", icon: Settings, roles: ["it_admin","manager"], testid: "nav-settings" },
+  { to: "/reports", label: "Raporlar", icon: ScrollText, roles: ["manager","it_admin"], testid: "nav-reports" },
+  { to: "/settings", label: "Ayarlar", icon: Settings, roles: ["it_admin","manager"], testid: "nav-settings" },
 ];
 
 export default function Layout() {
@@ -74,6 +75,7 @@ export default function Layout() {
           >
             <LogOut className="w-4 h-4 mr-2" strokeWidth={1.5} /> Çıkış Yap
           </Button>
+          <div className="mt-4 text-[10px] text-slate-400 text-center">© 2026 Gürses CRM · H.Sungur</div>
         </div>
       </aside>
       <main className="flex-1 overflow-auto">

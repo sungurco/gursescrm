@@ -109,29 +109,17 @@ export default function Requests() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">Sonuç bulunamadı.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">Sonuç bulunamadı.</td></tr>
               )}
               {items.map(r => {
-                const img = (r.files || []).find(f => (f.content_type||"").startsWith("image/"));
-                const thumb = img ? `${api.defaults.baseURL}/requests/${r.id}/files/${img.id}?auth=${localStorage.getItem("token")}` : null;
                 return (
                 <tr key={r.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-2">
-                    {thumb ? <img src={thumb} alt="" className="w-12 h-12 object-cover rounded border border-slate-200" data-testid={`thumb-${r.id}`} /> : <div className="w-12 h-12 rounded border border-slate-100 bg-slate-50" />}
-                  </td>
                   <td className="px-4 py-3"><Link data-testid={`row-${r.id}`} to={`/requests/${r.id}`} className="font-mono font-medium text-slate-900">{r.request_no}</Link></td>
                   <td className="px-4 py-3"><div>{r.store_name}</div><div className="text-xs text-slate-500">{r.brand}</div></td>
                   <td className="px-4 py-3"><div>{r.customer_name}</div><div className="text-xs text-slate-500 font-mono">{r.customer_phone}</div></td>
                   <td className="px-4 py-3 text-right font-mono">{r.total_amount?.toLocaleString("tr-TR")} ₺</td>
                   <td className="px-4 py-3 text-right font-mono">
-                    {(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? (
-                      <>
-                        <span className={r.profit_pct < r.min_profit_pct ? "text-rose-600" : "text-emerald-600"}>%{r.profit_pct}</span>
-                        <span className="text-xs text-slate-400"> / %{r.min_profit_pct}</span>
-                      </>
-                    ) : (
-                      <span className="text-slate-700">%{r.profit_pct}</span>
-                    )}
+                    <span className="text-slate-700">%{r.profit_pct}</span>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{r.assigned_to_name || <span className="text-slate-400">—</span>}</td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>

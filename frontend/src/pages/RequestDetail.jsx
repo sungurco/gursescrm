@@ -182,12 +182,17 @@ export default function RequestDetail() {
                 <div className="text-xs uppercase tracking-wider text-slate-500">Kâr</div>
                 <div className="font-mono text-lg font-semibold">{r.profit_amount?.toLocaleString("tr-TR")} ₺</div>
               </div>
-              <div className={`rounded-md border p-3 ${(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? (r.profit_pct < r.min_profit_pct ? "bg-rose-50 border-rose-200" : "bg-emerald-50 border-emerald-200") : "bg-slate-50 border-slate-200"}`}>
-                <div className="text-xs uppercase tracking-wider text-slate-600">
-                  {(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? `Kâr % (Min %${r.min_profit_pct})` : "Kâr %"}
+              {(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? (
+                <div className={`rounded-md border p-3 bg-slate-50 border-slate-200`}>
+                  <div className="text-xs uppercase tracking-wider text-slate-600">Kâr %</div>
+                  <div className="font-mono text-lg font-semibold">%{r.profit_pct}</div>
                 </div>
-                <div className="font-mono text-lg font-semibold">%{r.profit_pct}</div>
-              </div>
+              ) : (
+                <div className="bg-slate-50 rounded-md border border-slate-200 p-3">
+                  <div className="text-xs uppercase tracking-wider text-slate-500">Kâr %</div>
+                  <div className="font-mono text-lg font-semibold">%{r.profit_pct}</div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

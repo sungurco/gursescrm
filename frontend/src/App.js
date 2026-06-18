@@ -13,6 +13,7 @@ import AuditLog from "@/pages/AuditLog";
 import Users from "@/pages/Users";
 import Stores from "@/pages/Stores";
 import Settings from "@/pages/Settings";
+import Reports from "@/pages/Reports";
 import "@/App.css";
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
             <Route path="/users" element={<ProtectedRoute roles={["it_admin"]}><Users /></ProtectedRoute>} />
             <Route path="/stores" element={<ProtectedRoute roles={["it_admin","manager"]}><Stores /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute roles={["it_admin","manager"]}><Settings /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute roles={["it_admin","manager"]}><Reports /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

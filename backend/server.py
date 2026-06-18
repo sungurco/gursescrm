@@ -221,7 +221,7 @@ class RequestIn(BaseModel):
     customer_name: str
     customer_phone: Optional[str] = ""
     sale_date: str
-    product_info: str
+    product_info: Optional[str] = ""
     total_amount: float
     cost_amount: float
     payment_method: Literal["kredi_karti", "nakit", "senet", "havale", "diger"] = "nakit"
@@ -397,7 +397,7 @@ async def _next_request_number():
         {"_id": "request_seq"}, {"$inc": {"value": 1}}, upsert=True, return_document=True
     )
     val = counter["value"] if counter else 1
-    return f"REQ-{datetime.now(timezone.utc).strftime('%Y%m')}-{val:05d}"
+    return f"TLP-{datetime.now(timezone.utc).strftime('%Y%m')}-{val:05d}"
 
 @api.post("/requests")
 async def create_request(payload: RequestIn, user: dict = Depends(get_current_user)):
@@ -557,8 +557,10 @@ async def release_request(rid: str, user: dict = Depends(get_current_user)):
     r = await db.requests.find_one({"id": rid})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if r.get("assigned_to") != user["id"] and user["role"] != "it_admin":
-        raise HTTPException(status_code=403, detail="Sadece talebi alan kullanıcı serbest bırakabilir")
+    if user.get("role") == "store_user" and r.get("assigned_to") != user["id"] and user["role"] != "it_admin":
+        raise HTTPException(status_code=403, detail="Sadece talebi alan kullanıcı veya IT Admin serbest bırakabilir")
+    if r.get("assigned_to") is None:
+        return await db.requests.find_one({"id": rid}, {"_id": 0})
     now = datetime.now(timezone.utc).isoformat()
     await db.requests.update_one({"id": rid}, {
         "$set": {"assigned_to": None, "assigned_to_name": None, "assigned_at": None,
@@ -687,8 +689,9 @@ async def download_file(rid: str, fid: str, request: Request,
 @api.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
     base_q = {}
+    # Store user: only own created requests on dashboard (kendi açtığı talepler)
     if user["role"] == "store_user":
-        base_q["store_id"] = {"$in": user.get("store_ids") or []}
+        base_q["created_by"] = user["id"]
     counts = {}
     for s in STATUSES:
         counts[s] = await db.requests.count_documents({**base_q, "status": s})
@@ -729,6 +732,24 @@ async def audit_logs(user: dict = Depends(require_roles("it_admin")),
     q = {}
     if action: q["action"] = action
     return await db.audit_logs.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+
+# -------------------- Reports --------------------
+@api.get("/reports/requests")
+async def report_requests(
+    user: dict = Depends(require_roles("it_admin", "manager")),
+    status: Optional[str] = None, brand: Optional[str] = None,
+    store_id: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None,
+):
+    q = {}
+    if status: q["status"] = status
+    if brand: q["brand"] = brand
+    if store_id: q["store_id"] = store_id
+    if date_from or date_to:
+        q["created_at"] = {}
+        if date_from: q["created_at"]["$gte"] = date_from
+        if date_to: q["created_at"]["$lte"] = date_to + "T23:59:59Z"
+    items = await db.requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    return items
 
 # -------------------- Mount --------------------
 app.include_router(api)

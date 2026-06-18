@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,11 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [logo, setLogo] = useState("");
+
+  useEffect(() => {
+    api.get("/settings/logo").then(r => setLogo(r.data.logo_data_url || "")).catch(()=>{});
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -55,7 +61,7 @@ export default function Login() {
             E-posta ve WhatsApp karmaşasına son. Arçelik, Bellona, Mondi mağazalarınız için merkezi, denetlenebilir ve hızlı onay süreci.
           </p>
         </div>
-        <div className="relative z-10 text-xs text-slate-400">© 2026 Gürses CRM</div>
+        <div className="relative z-10 text-xs text-slate-400">© 2026 Gürses CRM · H.Sungur</div>
       </div>
 
       <div className="flex-1 flex items-center justify-center p-8 bg-[#F8FAFC]">
