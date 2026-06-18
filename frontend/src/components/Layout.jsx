@@ -12,7 +12,7 @@ const NAV = [
   { to: "/audit", label: "Denetim Günlüğü", icon: ScrollText, roles: ["it_admin"], testid: "nav-audit" },
   { to: "/users", label: "Kullanıcılar", icon: Users, roles: ["it_admin"], testid: "nav-users" },
   { to: "/stores", label: "Mağazalar", icon: Store, roles: ["it_admin","manager"], testid: "nav-stores" },
-  { to: "/reports", label: "Raporlar", icon: ScrollText, roles: ["manager","it_admin"], testid: "nav-reports" },
+  { to: "/reports", label: "Raporlar", icon: ScrollText, roles: ["manager","it_admin"], permission: "can_view_reports", testid: "nav-reports" },
   { to: "/settings", label: "Ayarlar", icon: Settings, roles: ["it_admin","manager"], testid: "nav-settings" },
 ];
 
@@ -47,7 +47,7 @@ export default function Layout() {
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.filter(n => n.roles.includes(user.role)).map((n) => (
+          {NAV.filter(n => n.roles.includes(user.role) || (n.permission && (user.permissions||[]).includes(n.permission))).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}

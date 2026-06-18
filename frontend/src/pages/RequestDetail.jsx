@@ -27,6 +27,8 @@ export default function RequestDetail() {
   const [statusComment, setStatusComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({});
 
   const load = async () => {
     try {
@@ -48,8 +50,6 @@ export default function RequestDetail() {
   const isStoreOwner = user.role === "store_user" && (user.store_ids || []).includes(r.store_id);
   const isClosed = ["approved","rejected","cancelled"].includes(r.status);
   const canEdit = (isStoreOwner || isAdmin) && !r.assigned_to && !isClosed;
-  const [editMode, setEditMode] = useState(false);
-  const [editForm, setEditForm] = useState({});
 
   const startEdit = () => {
     setEditForm({

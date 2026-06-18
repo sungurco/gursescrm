@@ -34,7 +34,7 @@ function App() {
             <Route path="/users" element={<ProtectedRoute roles={["it_admin"]}><Users /></ProtectedRoute>} />
             <Route path="/stores" element={<ProtectedRoute roles={["it_admin","manager"]}><Stores /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute roles={["it_admin","manager"]}><Settings /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute roles={["it_admin","manager"]}><Reports /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute roles={["it_admin","manager"]} permission="can_view_reports"><Reports /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

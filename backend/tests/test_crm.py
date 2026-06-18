@@ -73,9 +73,10 @@ def new_request(tokens, store_arcelik):
     assert r.status_code == 200, r.text
     j = r.json()
     assert j['profit_amount'] == 1000
-    assert j['profit_pct'] == 10.0
+    # Profit pct uses (total-cost)/cost*100 = 1000/9000*100 = 11.11
+    assert j['profit_pct'] == 11.11
     assert j['min_profit_pct'] == 15.0
-    assert j['request_no'].startswith('REQ-')
+    assert j['request_no'].startswith('TLP-')
     assert j['status'] == 'new'
     return j
 

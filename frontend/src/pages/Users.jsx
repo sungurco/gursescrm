@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, KeyRound, Pencil } from "lucide-react";
 
-const EMPTY = { email:"", password:"", name:"", role:"store_user", store_ids:[], is_active: true };
+const EMPTY = { email:"", password:"", name:"", role:"store_user", store_ids:[], is_active: true, permissions: [] };
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -31,14 +31,14 @@ export default function Users() {
   const openNew = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
   const openEdit = (u) => {
     setEditing(u);
-    setForm({ email: u.email, password: "", name: u.name, role: u.role, store_ids: u.store_ids || [], is_active: u.is_active });
+    setForm({ email: u.email, password: "", name: u.name, role: u.role, store_ids: u.store_ids || [], is_active: u.is_active, permissions: u.permissions || [] });
     setOpen(true);
   };
 
   const save = async () => {
     try {
       if (editing) {
-        const payload = { name: form.name, role: form.role, store_ids: form.store_ids, is_active: form.is_active };
+        const payload = { name: form.name, role: form.role, store_ids: form.store_ids, is_active: form.is_active, permissions: form.permissions };
         if (form.password) payload.password = form.password;
         await api.put(`/users/${editing.id}`, payload);
         toast.success("Kullanıcı güncellendi");
@@ -169,6 +169,27 @@ export default function Users() {
                   {stores.length === 0 && <div className="text-xs text-slate-500">Önce mağaza ekleyin.</div>}
                 </div>
                 <div className="text-xs text-slate-500 mt-1">Seçili: {form.store_ids.length}</div>
+              </div>
+            )}
+            {form.role !== "it_admin" && form.role !== "manager" && (
+              <div>
+                <Label>Ek İzinler</Label>
+                <div className="mt-2 border border-slate-200 rounded-md p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 px-2 py-1 rounded">
+                    <Checkbox
+                      data-testid="perm-reports"
+                      checked={(form.permissions||[]).includes("can_view_reports")}
+                      onCheckedChange={(v)=>setForm(f=>({
+                        ...f,
+                        permissions: v
+                          ? Array.from(new Set([...(f.permissions||[]), "can_view_reports"]))
+                          : (f.permissions||[]).filter(p=>p!=="can_view_reports")
+                      }))}
+                    />
+                    <span>Raporları Görüntüleyebilir</span>
+                  </label>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">Manager ve IT Admin rolleri tüm yetkilere zaten sahiptir.</div>
               </div>
             )}
             <Button data-testid="user-save-submit" onClick={save} className="bg-slate-900 hover:bg-slate-800 w-full">

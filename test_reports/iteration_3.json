@@ -1,0 +1,43 @@
+{
+  "summary": "Verified 5 previously-applied fixes (Gürses CRM). Backend: 34/34 pytest pass (11 new tests in test_fixes.py + 23 regression in test_crm.py updated for new profit formula and TLP- prefix). Frontend: all 5 UI fixes verified via Playwright — RequestDetail no longer crashes (hooks-order bug fixed), edit form shows all 9 fields, live profit calc gives 100.00%/25.00%, CSV export has UTF-8 BOM + semicolon + multi-line + Turkish headers, Users edit modal exposes 'Ek İzinler > Raporları Görüntüleyebilir' (data-testid=perm-reports), approved-request Karar Ver panel shows revert banner and Reddet → Reddedildi works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Edit request as admin", "issue": "Backend allows it_admin to PUT /api/requests/{id}, but RequestDetail.jsx only renders 'Talebi Düzenle' button when isStoreOwner && !isClosed && canEdit. Admin role logged in does NOT see the edit button in UI (would need to call API directly). The test spec asked admin to click the button. Either widen the UI guard to include it_admin or update the spec.", "affected_selectors": ["[data-testid='edit-request-btn']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_fixes.py",
+    "/app/backend/tests/test_crm.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/fixes_results.xml"
+  ],
+  "action_items": [
+    "(Optional/Minor) Update RequestDetail.jsx so 'Talebi Düzenle' button is visible to it_admin too (currently only store owners see it, although backend permits admin edits)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:741-748 require_reports_access() correctly grants reports access to it_admin/manager OR users with 'can_view_reports' in permissions array. Verified by 5 backend tests.",
+    "server.py:510-536 update_request now accepts payment_method via RequestUpdateIn and recomputes profit_pct = (total-cost)/cost*100; admin/store_owner gated; closed/assigned guarded. Verified.",
+    "server.py status-change endpoint accepts revert from 'approved' for admin/manager (history appended) — verified via 3 backend tests.",
+    "Reports.jsx exportCSV: UTF-8 BOM \\ufeff + semicolon + CRLF — verified by downloading CSV (40 lines, headers 'Talep No;Mağaza;...').",
+    "Users.jsx checkbox with data-testid='perm-reports' renders in edit modal under 'Ek İzinler' section — verified visually.",
+    "RequestDetail.jsx hooks-order fix: useState declarations moved above early return guard — page no longer crashes when opening open/Yeni request. Verified.",
+    "Layout.jsx + ProtectedRoute.jsx + App.js consistently wire `permission: 'can_view_reports'` so an approval/store user granted that perm can see Raporlar nav and access /reports route."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_fixes.py (NEW - 11 targeted tests for the 5 fixes)",
+    "/app/backend/tests/test_crm.py (updated stale assertions: profit_pct 10.0→11.11 per new (total-cost)/cost formula; request_no prefix REQ-→TLP-)"
+  ],
+  "success_rate": {"backend": "100% (34/34)", "frontend": "100% on tested flows (5/5 fixes verified)"},
+  "test_credentials": "All 7 seed accounts from /app/memory/test_credentials.md still working.",
+  "seed_data_creation": "Created TEST_ prefixed requests during tests (TEST_UPD1, TEST_REVERT1, TEST_PCT_25, TEST_PCT_100). Not cleaned up but harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test layout: test_crm.py (23 regression) + test_fixes.py (11 targeted). Both can be run together: pytest /app/backend/tests/. Note: request_no prefix is TLP-YYYYMM-NNNNN and profit_pct formula is (total-cost)/cost*100. For the perm-reports flow, after PUT /api/users/{id} with permissions=['can_view_reports'], the approval user must re-login for the JWT to refresh; alternatively the GET /api/auth/me would still reflect permissions on next call. Frontend important selectors: [data-testid='login-submit-btn'], [data-testid='edit-request-btn'], [data-testid='perm-reports'], [data-testid='approve-btn'/'reject-btn'/'info-btn'].",
+  "rca_of_the_issue": "All 5 previously-applied fixes verified working. Only minor gap: admin role cannot see Talebi Düzenle button in UI even though backend supports admin edits (RequestDetail.jsx guard is isStoreOwner-only). Reported as integration issue."
+}

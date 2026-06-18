@@ -195,6 +195,7 @@ class UserCreateIn(BaseModel):
     role: Literal["store_user", "approval_user", "manager", "it_admin"]
     store_ids: List[str] = []
     phone: Optional[str] = None
+    permissions: List[str] = []
 
 class UserUpdateIn(BaseModel):
     name: Optional[str] = None
@@ -203,6 +204,7 @@ class UserUpdateIn(BaseModel):
     phone: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    permissions: Optional[List[str]] = None
 
 class StoreIn(BaseModel):
     name: str
@@ -235,6 +237,7 @@ class RequestUpdateIn(BaseModel):
     product_info: Optional[str] = None
     total_amount: Optional[float] = None
     cost_amount: Optional[float] = None
+    payment_method: Optional[Literal["kredi_karti", "nakit", "senet", "havale", "diger"]] = None
     reason: Optional[str] = None
     additional_notes: Optional[str] = None
 
@@ -339,6 +342,7 @@ async def create_user(payload: UserCreateIn, user: dict = Depends(require_roles(
         "id": uid, "email": email, "password_hash": hash_password(payload.password),
         "name": payload.name, "role": payload.role, "store_ids": payload.store_ids or [],
         "phone": payload.phone, "is_active": True,
+        "permissions": payload.permissions or [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(doc)
@@ -734,9 +738,18 @@ async def audit_logs(user: dict = Depends(require_roles("it_admin")),
     return await db.audit_logs.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
 
 # -------------------- Reports --------------------
+def require_reports_access():
+    async def checker(user: dict = Depends(get_current_user)):
+        if user["role"] in ("it_admin", "manager"):
+            return user
+        if "can_view_reports" in (user.get("permissions") or []):
+            return user
+        raise HTTPException(status_code=403, detail="Raporları görüntüleme yetkiniz yok")
+    return checker
+
 @api.get("/reports/requests")
 async def report_requests(
-    user: dict = Depends(require_roles("it_admin", "manager")),
+    user: dict = Depends(require_reports_access()),
     status: Optional[str] = None, brand: Optional[str] = None,
     store_id: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None,
 ):
