@@ -42,7 +42,7 @@ export default function RequestCreate() {
   const total = parseFloat(form.total_amount) || 0;
   const cost = parseFloat(form.cost_amount) || 0;
   const profit = total - cost;
-  const pct = total > 0 ? ((profit / total) * 100).toFixed(2) : "0.00";
+  const pct = cost > 0 ? ((profit / cost) * 100).toFixed(2) : "0.00";
 
   const submit = async (e) => {
     e.preventDefault();

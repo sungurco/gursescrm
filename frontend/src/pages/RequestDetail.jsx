@@ -44,10 +44,27 @@ export default function RequestDetail() {
   const isApprovalUser = user.role === "approval_user" || user.role === "it_admin";
   const isMine = r.assigned_to === user.id;
   const isAdmin = user.role === "it_admin";
-  const canChangeStatus = isMine || isAdmin;
+  const canChangeStatus = isMine || isAdmin || user.role === "manager";
   const isStoreOwner = user.role === "store_user" && (user.store_ids || []).includes(r.store_id);
   const isClosed = ["approved","rejected","cancelled"].includes(r.status);
   const canEdit = (isStoreOwner || isAdmin) && !r.assigned_to && !isClosed;
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({});
+
+  const startEdit = () => {
+    setEditForm({
+      customer_name: r.customer_name, customer_phone: r.customer_phone || "", sale_date: r.sale_date,
+      product_info: r.product_info || "", total_amount: r.total_amount, cost_amount: r.cost_amount,
+      payment_method: r.payment_method || "nakit", reason: r.reason, additional_notes: r.additional_notes || ""
+    });
+    setEditMode(true);
+  };
+  const saveEdit = async () => {
+    try {
+      await api.put(`/requests/${id}`, { ...editForm, total_amount: parseFloat(editForm.total_amount), cost_amount: parseFloat(editForm.cost_amount) });
+      toast.success("Talep güncellendi"); setEditMode(false); await load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   const claim = async () => {
     setBusy(true);
@@ -149,6 +166,30 @@ export default function RequestDetail() {
             <span className="text-amber-800"> talebi üstlenmiş durumda. Atanan onay personeli olduğu için talep düzenlenemez.</span>
           </div>
         </div>
+      )}
+
+      {editMode && (
+        <Card className="border-amber-200 shadow-none bg-amber-50/50">
+          <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Talebi Düzenle</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div><label className="text-xs text-slate-600">Müşteri Adı</label><input className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.customer_name} onChange={(e)=>setEditForm({...editForm, customer_name:e.target.value})}/></div>
+            <div><label className="text-xs text-slate-600">Telefon (11 hane, opsiyonel)</label><input className="mt-1 w-full border rounded px-2 py-1.5 text-sm font-mono" value={editForm.customer_phone} onChange={(e)=>setEditForm({...editForm, customer_phone:e.target.value.replace(/[^0-9]/g,'').slice(0,11)})}/></div>
+            <div><label className="text-xs text-slate-600">Satış Tarihi</label><input type="date" className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.sale_date} onChange={(e)=>setEditForm({...editForm, sale_date:e.target.value})}/></div>
+            <div><label className="text-xs text-slate-600">Ödeme</label>
+              <select className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.payment_method} onChange={(e)=>setEditForm({...editForm, payment_method:e.target.value})}>
+                <option value="nakit">Nakit</option><option value="kredi_karti">Kredi Kartı</option><option value="senet">Senet</option><option value="havale">Havale/EFT</option><option value="diger">Diğer</option>
+              </select></div>
+            <div className="md:col-span-2"><label className="text-xs text-slate-600">Ürün Bilgisi</label><textarea rows={2} className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.product_info} onChange={(e)=>setEditForm({...editForm, product_info:e.target.value})}/></div>
+            <div><label className="text-xs text-slate-600">Toplam Satış (₺)</label><input type="number" step="0.01" className="mt-1 w-full border rounded px-2 py-1.5 text-sm font-mono" value={editForm.total_amount} onChange={(e)=>setEditForm({...editForm, total_amount:e.target.value})}/></div>
+            <div><label className="text-xs text-slate-600">Maliyet (₺)</label><input type="number" step="0.01" className="mt-1 w-full border rounded px-2 py-1.5 text-sm font-mono" value={editForm.cost_amount} onChange={(e)=>setEditForm({...editForm, cost_amount:e.target.value})}/></div>
+            <div className="md:col-span-2"><label className="text-xs text-slate-600">Düşük Marj Nedeni</label><textarea rows={2} className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.reason} onChange={(e)=>setEditForm({...editForm, reason:e.target.value})}/></div>
+            <div className="md:col-span-2"><label className="text-xs text-slate-600">Ek Notlar</label><textarea rows={2} className="mt-1 w-full border rounded px-2 py-1.5 text-sm" value={editForm.additional_notes} onChange={(e)=>setEditForm({...editForm, additional_notes:e.target.value})}/></div>
+            <div className="md:col-span-2 flex gap-2">
+              <Button data-testid="edit-save-btn" onClick={saveEdit} className="bg-slate-900 hover:bg-slate-800">Kaydet</Button>
+              <Button variant="outline" onClick={()=>setEditMode(false)}>İptal</Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -265,15 +306,18 @@ export default function RequestDetail() {
         </div>
 
         <div className="space-y-6">
-          {canChangeStatus && !isClosed && (
+          {canChangeStatus && (
             <Card className="border-slate-200 shadow-none">
               <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Karar Ver</CardTitle></CardHeader>
               <CardContent className="space-y-3">
+                {isClosed && (isAdmin || user.role === "manager") && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Bu talep kapanmış; yine de durumunu değiştirebilirsiniz.</div>
+                )}
                 <Textarea data-testid="status-comment" value={statusComment} onChange={(e)=>setStatusComment(e.target.value)} placeholder="Yorum (opsiyonel)" rows={2} />
                 <div className="grid grid-cols-1 gap-2">
                   <Button data-testid="approve-btn" onClick={()=>changeStatus("approved")} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white">Onayla</Button>
                   <Button data-testid="reject-btn" onClick={()=>changeStatus("rejected")} disabled={busy} className="bg-rose-600 hover:bg-rose-700 text-white">Reddet</Button>
-                  <Button data-testid="info-btn" onClick={()=>changeStatus("waiting_info")} disabled={busy} variant="outline">Bilgi İste</Button>
+                  <Button data-testid="info-btn" onClick={()=>changeStatus("waiting_info")} disabled={busy} variant="outline">Bilgi İste / Tekrar Aç</Button>
                 </div>
               </CardContent>
             </Card>
@@ -284,16 +328,7 @@ export default function RequestDetail() {
               <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Eylemler</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {canEdit && (
-                  <Button data-testid="edit-request-btn" onClick={async()=>{
-                    const reason = window.prompt("Düşük marj nedeni:", r.reason);
-                    if (reason === null) return;
-                    const notes = window.prompt("Ek notlar:", r.additional_notes || "") || "";
-                    try {
-                      await api.put(`/requests/${id}`, { reason, additional_notes: notes });
-                      toast.success("Talep güncellendi");
-                      load();
-                    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-                  }} variant="outline" className="w-full">Talebi Düzenle</Button>
+                  <Button data-testid="edit-request-btn" onClick={startEdit} variant="outline" className="w-full">Talebi Düzenle</Button>
                 )}
                 {!canEdit && r.assigned_to && (
                   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Talep üstlenildi, düzenleme kapalı.</div>

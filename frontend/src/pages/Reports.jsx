@@ -31,7 +31,8 @@ export default function Reports() {
   const exportCSV = () => {
     const headers = ["Talep No","Mağaza","Marka","Müşteri","Telefon","Tutar","Maliyet","Kâr","Kâr %","Ödeme","Durum","Atanan","Oluşturma","Karar"];
     const rows = items.map(r => [r.request_no,r.store_name,r.brand,r.customer_name,r.customer_phone,r.total_amount,r.cost_amount,r.profit_amount,r.profit_pct,r.payment_method,STATUS_LABELS[r.status],r.assigned_to_name||"",r.created_at?.slice(0,16),r.decided_at?.slice(0,16)||""]);
-    const csv = [headers, ...rows].map(row => row.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    // Use semicolon delimiter (Turkish Excel default) and CRLF line endings
+    const csv = [headers, ...rows].map(row => row.map(c => `"${String(c??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
     const blob = new Blob(["\uFEFF"+csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `rapor_${new Date().toISOString().slice(0,10)}.csv`; a.click();
   };
