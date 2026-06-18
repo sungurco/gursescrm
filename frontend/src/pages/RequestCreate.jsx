@@ -23,6 +23,7 @@ export default function RequestCreate() {
     product_info: "",
     total_amount: "",
     cost_amount: "",
+    payment_method: "nakit",
     reason: "",
     additional_notes: "",
   });
@@ -32,8 +33,8 @@ export default function RequestCreate() {
   useEffect(() => {
     api.get("/stores").then(r => {
       setStores(r.data);
-      if (user.role === "store_user" && user.store_id) {
-        setForm(f => ({ ...f, store_id: user.store_id }));
+      if (user.role === "store_user" && r.data.length === 1) {
+        setForm(f => ({ ...f, store_id: r.data[0].id }));
       }
     });
   }, [user]);
@@ -101,6 +102,19 @@ export default function RequestCreate() {
               <div>
                 <Label>Satış Tarihi</Label>
                 <Input data-testid="sale-date" type="date" required value={form.sale_date} onChange={(e)=>setForm({...form, sale_date: e.target.value})} className="mt-1.5" />
+              </div>
+              <div>
+                <Label>Ödeme Yöntemi</Label>
+                <Select value={form.payment_method} onValueChange={(v)=>setForm({...form, payment_method: v})}>
+                  <SelectTrigger data-testid="payment-method" className="mt-1.5"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="nakit">Nakit</SelectItem>
+                    <SelectItem value="kredi_karti">Kredi Kartı</SelectItem>
+                    <SelectItem value="senet">Senet</SelectItem>
+                    <SelectItem value="havale">Havale / EFT</SelectItem>
+                    <SelectItem value="diger">Diğer</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div>

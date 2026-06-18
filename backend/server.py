@@ -151,13 +151,13 @@ class UserCreateIn(BaseModel):
     password: str
     name: str
     role: Literal["store_user", "approval_user", "manager", "it_admin"]
-    store_id: Optional[str] = None
+    store_ids: List[str] = []
     phone: Optional[str] = None
 
 class UserUpdateIn(BaseModel):
     name: Optional[str] = None
     role: Optional[Literal["store_user", "approval_user", "manager", "it_admin"]] = None
-    store_id: Optional[str] = None
+    store_ids: Optional[List[str]] = None
     phone: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -182,6 +182,7 @@ class RequestIn(BaseModel):
     product_info: str
     total_amount: float
     cost_amount: float
+    payment_method: Literal["kredi_karti", "nakit", "senet", "havale", "diger"] = "nakit"
     reason: str
     additional_notes: Optional[str] = ""
 
@@ -231,7 +232,10 @@ async def me(user: dict = Depends(get_current_user)):
 # -------------------- Stores --------------------
 @api.get("/stores")
 async def list_stores(user: dict = Depends(get_current_user)):
-    stores = await db.stores.find({}, {"_id": 0}).to_list(1000)
+    q = {}
+    if user["role"] == "store_user":
+        q["id"] = {"$in": user.get("store_ids") or []}
+    stores = await db.stores.find(q, {"_id": 0}).to_list(1000)
     return stores
 
 @api.post("/stores")
@@ -291,7 +295,7 @@ async def create_user(payload: UserCreateIn, user: dict = Depends(require_roles(
     uid = str(uuid.uuid4())
     doc = {
         "id": uid, "email": email, "password_hash": hash_password(payload.password),
-        "name": payload.name, "role": payload.role, "store_id": payload.store_id,
+        "name": payload.name, "role": payload.role, "store_ids": payload.store_ids or [],
         "phone": payload.phone, "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -331,6 +335,9 @@ async def _next_request_number():
 async def create_request(payload: RequestIn, user: dict = Depends(get_current_user)):
     if user["role"] not in ("store_user", "it_admin", "manager"):
         raise HTTPException(status_code=403, detail="Only store users can create requests")
+    if user["role"] == "store_user":
+        if payload.store_id not in (user.get("store_ids") or []):
+            raise HTTPException(status_code=403, detail="Bu mağaza için talep oluşturma yetkiniz yok")
     store = await db.stores.find_one({"id": payload.store_id}, {"_id": 0})
     if not store:
         raise HTTPException(status_code=400, detail="Store not found")
@@ -359,6 +366,7 @@ async def create_request(payload: RequestIn, user: dict = Depends(get_current_us
         "min_profit_pct": min_pct,
         "reason": payload.reason,
         "additional_notes": payload.additional_notes or "",
+        "payment_method": payload.payment_method,
         "status": "new",
         "assigned_to": None,
         "assigned_to_name": None,
@@ -397,8 +405,8 @@ async def list_requests(
     if store_id: q["store_id"] = store_id
     if brand: q["brand"] = brand
     # Enforce store scope for store_user AFTER user-provided filters
-    if user["role"] == "store_user" and user.get("store_id"):
-        q["store_id"] = user["store_id"]
+    if user["role"] == "store_user":
+        q["store_id"] = {"$in": user.get("store_ids") or []}
     if assigned_to:
         q["assigned_to"] = None if assigned_to == "unassigned" else assigned_to
     if date_from or date_to:
@@ -421,7 +429,7 @@ async def get_request(rid: str, user: dict = Depends(get_current_user)):
     r = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+    if user["role"] == "store_user" and r["store_id"] not in (user.get("store_ids") or []):
         raise HTTPException(status_code=403, detail="Forbidden")
     return r
 
@@ -470,7 +478,7 @@ async def change_status(rid: str, payload: StatusChangeIn, user: dict = Depends(
         raise HTTPException(status_code=404, detail="Request not found")
     # permissions
     if user["role"] == "store_user":
-        if payload.status != "cancelled" or r["store_id"] != user.get("store_id"):
+        if payload.status != "cancelled" or r["store_id"] not in (user.get("store_ids") or []):
             raise HTTPException(status_code=403, detail="Sadece kendi talebinizi iptal edebilirsiniz")
     elif user["role"] in ("approval_user",):
         if r.get("assigned_to") != user["id"]:
@@ -494,7 +502,7 @@ async def add_comment(rid: str, payload: CommentIn, user: dict = Depends(get_cur
     r = await db.requests.find_one({"id": rid})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+    if user["role"] == "store_user" and r["store_id"] not in (user.get("store_ids") or []):
         raise HTTPException(status_code=403, detail="Forbidden")
     comment = {
         "id": str(uuid.uuid4()), "text": payload.text,
@@ -516,7 +524,7 @@ async def upload_file(rid: str, file: UploadFile = File(...), user: dict = Depen
     r = await db.requests.find_one({"id": rid})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+    if user["role"] == "store_user" and r["store_id"] not in (user.get("store_ids") or []):
         raise HTTPException(status_code=403, detail="Forbidden")
     ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
     if ext not in MIME_TYPES:
@@ -569,7 +577,7 @@ async def download_file(rid: str, fid: str, request: Request,
     r = await db.requests.find_one({"id": rid}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Request not found")
-    if user["role"] == "store_user" and r["store_id"] != user.get("store_id"):
+    if user["role"] == "store_user" and r["store_id"] not in (user.get("store_ids") or []):
         raise HTTPException(status_code=403, detail="Forbidden")
     f = next((x for x in r.get("files", []) if x["id"] == fid), None)
     if not f:
@@ -581,8 +589,8 @@ async def download_file(rid: str, fid: str, request: Request,
 @api.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
     base_q = {}
-    if user["role"] == "store_user" and user.get("store_id"):
-        base_q["store_id"] = user["store_id"]
+    if user["role"] == "store_user":
+        base_q["store_id"] = {"$in": user.get("store_ids") or []}
     counts = {}
     for s in STATUSES:
         counts[s] = await db.requests.count_documents({**base_q, "status": s})
@@ -618,7 +626,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
 # -------------------- Audit Log --------------------
 @api.get("/audit-logs")
-async def audit_logs(user: dict = Depends(require_roles("it_admin", "manager")),
+async def audit_logs(user: dict = Depends(require_roles("it_admin")),
                      limit: int = 200, action: Optional[str] = None):
     q = {}
     if action: q["action"] = action
@@ -668,21 +676,25 @@ async def seed_initial_data():
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@crm.local")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     seed_users = [
-        {"email": admin_email, "password": admin_password, "name": "IT Admin", "role": "it_admin", "store_id": None},
-        {"email": "manager@crm.local", "password": "Manager123!", "name": "Genel Müdür", "role": "manager", "store_id": None},
-        {"email": "approval@crm.local", "password": "Approval123!", "name": "Onay Personeli", "role": "approval_user", "store_id": None},
-        {"email": "approval2@crm.local", "password": "Approval123!", "name": "Onay Personeli 2", "role": "approval_user", "store_id": None},
-        {"email": "arcelik@crm.local", "password": "Store123!", "name": "Arçelik Kadıköy Sorumlusu", "role": "store_user", "store_id": store_ids.get("Arçelik")},
-        {"email": "bellona@crm.local", "password": "Store123!", "name": "Bellona Merkez Sorumlusu", "role": "store_user", "store_id": store_ids.get("Bellona")},
-        {"email": "mondi@crm.local", "password": "Store123!", "name": "Mondi Şube Sorumlusu", "role": "store_user", "store_id": store_ids.get("Mondi")},
+        {"email": admin_email, "password": admin_password, "name": "IT Admin", "role": "it_admin", "store_ids": []},
+        {"email": "manager@crm.local", "password": "Manager123!", "name": "Genel Müdür", "role": "manager", "store_ids": []},
+        {"email": "approval@crm.local", "password": "Approval123!", "name": "Onay Personeli", "role": "approval_user", "store_ids": []},
+        {"email": "approval2@crm.local", "password": "Approval123!", "name": "Onay Personeli 2", "role": "approval_user", "store_ids": []},
+        {"email": "arcelik@crm.local", "password": "Store123!", "name": "Arçelik Kadıköy Sorumlusu", "role": "store_user", "store_ids": [store_ids.get("Arçelik")] if store_ids.get("Arçelik") else []},
+        {"email": "bellona@crm.local", "password": "Store123!", "name": "Bellona Merkez Sorumlusu", "role": "store_user", "store_ids": [store_ids.get("Bellona")] if store_ids.get("Bellona") else []},
+        {"email": "mondi@crm.local", "password": "Store123!", "name": "Mondi Şube Sorumlusu", "role": "store_user", "store_ids": [store_ids.get("Mondi")] if store_ids.get("Mondi") else []},
     ]
     for u in seed_users:
         existing = await db.users.find_one({"email": u["email"].lower()})
         if existing:
-            # Ensure password matches env
+            updates = {}
             if not verify_password(u["password"], existing["password_hash"]):
-                await db.users.update_one({"email": u["email"].lower()},
-                                          {"$set": {"password_hash": hash_password(u["password"])}})
+                updates["password_hash"] = hash_password(u["password"])
+            # Migrate legacy store_id -> store_ids
+            if "store_id" in existing and "store_ids" not in existing:
+                updates["store_ids"] = [existing["store_id"]] if existing.get("store_id") else u["store_ids"]
+            if updates:
+                await db.users.update_one({"email": u["email"].lower()}, {"$set": updates})
             continue
         await db.users.insert_one({
             "id": str(uuid.uuid4()),
@@ -690,7 +702,7 @@ async def seed_initial_data():
             "password_hash": hash_password(u["password"]),
             "name": u["name"],
             "role": u["role"],
-            "store_id": u["store_id"],
+            "store_ids": u["store_ids"],
             "phone": None,
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),

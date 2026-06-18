@@ -8,7 +8,7 @@ const NAV = [
   { to: "/dashboard", label: "Pano", icon: LayoutDashboard, roles: ["store_user","approval_user","manager","it_admin"], testid: "nav-dashboard" },
   { to: "/requests", label: "Talepler", icon: ClipboardList, roles: ["store_user","approval_user","manager","it_admin"], testid: "nav-requests" },
   { to: "/kanban", label: "Kanban", icon: KanbanSquare, roles: ["approval_user","manager","it_admin"], testid: "nav-kanban" },
-  { to: "/audit", label: "Denetim Günlüğü", icon: ScrollText, roles: ["manager","it_admin"], testid: "nav-audit" },
+  { to: "/audit", label: "Denetim Günlüğü", icon: ScrollText, roles: ["it_admin"], testid: "nav-audit" },
   { to: "/users", label: "Kullanıcılar", icon: Users, roles: ["it_admin"], testid: "nav-users" },
   { to: "/stores", label: "Mağazalar", icon: Store, roles: ["it_admin","manager"], testid: "nav-stores" },
   { to: "/settings", label: "Kâr Marjı Ayarları", icon: Settings, roles: ["it_admin","manager"], testid: "nav-settings" },

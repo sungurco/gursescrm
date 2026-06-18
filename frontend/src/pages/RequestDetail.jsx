@@ -151,6 +151,7 @@ export default function RequestDetail() {
               <FieldRow label="Satış Tarihi" value={r.sale_date} mono />
               <FieldRow label="Müşteri" value={r.customer_name} />
               <FieldRow label="Telefon" value={r.customer_phone} mono />
+              <FieldRow label="Ödeme Yöntemi" value={({kredi_karti:"Kredi Kartı",nakit:"Nakit",senet:"Senet",havale:"Havale/EFT",diger:"Diğer"})[r.payment_method] || r.payment_method || "—"} />
               <div className="md:col-span-2"><FieldRow label="Ürün" value={r.product_info} /></div>
             </CardContent>
           </Card>
@@ -170,8 +171,10 @@ export default function RequestDetail() {
                 <div className="text-xs uppercase tracking-wider text-slate-500">Kâr</div>
                 <div className="font-mono text-lg font-semibold">{r.profit_amount?.toLocaleString("tr-TR")} ₺</div>
               </div>
-              <div className={`rounded-md border p-3 ${r.profit_pct < r.min_profit_pct ? "bg-rose-50 border-rose-200" : "bg-emerald-50 border-emerald-200"}`}>
-                <div className="text-xs uppercase tracking-wider text-slate-600">Kâr % (Min %{r.min_profit_pct})</div>
+              <div className={`rounded-md border p-3 ${(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? (r.profit_pct < r.min_profit_pct ? "bg-rose-50 border-rose-200" : "bg-emerald-50 border-emerald-200") : "bg-slate-50 border-slate-200"}`}>
+                <div className="text-xs uppercase tracking-wider text-slate-600">
+                  {(user.role === 'approval_user' || user.role === 'manager' || user.role === 'it_admin') ? `Kâr % (Min %${r.min_profit_pct})` : "Kâr %"}
+                </div>
                 <div className="font-mono text-lg font-semibold">%{r.profit_pct}</div>
               </div>
             </CardContent>
@@ -200,14 +203,17 @@ export default function RequestDetail() {
                 {r.files.length === 0 && <div className="text-sm text-slate-500">Henüz dosya yüklenmedi.</div>}
                 {r.files.map(f => (
                   <div key={f.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-md">
-                    <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                       {f.content_type?.startsWith("image/") ? <ImgIcon className="w-4 h-4 text-slate-500" strokeWidth={1.5}/> : <FileText className="w-4 h-4 text-slate-500" strokeWidth={1.5}/>}
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{f.original_filename}</div>
                         <div className="text-xs text-slate-500">{f.uploaded_by_name} · {Math.round((f.size||0)/1024)} KB</div>
                       </div>
                     </div>
-                    <a href={fileUrl(f)} target="_blank" rel="noreferrer" data-testid={`download-file-${f.id}`} className="text-sm text-slate-700 hover:text-slate-900 inline-flex items-center gap-1">
+                    <a href={fileUrl(f)} target="_blank" rel="noreferrer" data-testid={`view-file-${f.id}`} className="text-sm text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 mr-3">
+                      <ImgIcon className="w-4 h-4" strokeWidth={1.5}/> Görüntüle
+                    </a>
+                    <a href={fileUrl(f)} download={f.original_filename} data-testid={`download-file-${f.id}`} className="text-sm text-slate-700 hover:text-slate-900 inline-flex items-center gap-1">
                       <Download className="w-4 h-4" strokeWidth={1.5}/> İndir
                     </a>
                   </div>

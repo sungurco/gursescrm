@@ -29,7 +29,7 @@ function App() {
             <Route path="/requests/new" element={<ProtectedRoute roles={["store_user","it_admin","manager"]}><RequestCreate /></ProtectedRoute>} />
             <Route path="/requests/:id" element={<RequestDetail />} />
             <Route path="/kanban" element={<ProtectedRoute roles={["approval_user","manager","it_admin"]}><Kanban /></ProtectedRoute>} />
-            <Route path="/audit" element={<ProtectedRoute roles={["it_admin","manager"]}><AuditLog /></ProtectedRoute>} />
+            <Route path="/audit" element={<ProtectedRoute roles={["it_admin"]}><AuditLog /></ProtectedRoute>} />
             <Route path="/users" element={<ProtectedRoute roles={["it_admin"]}><Users /></ProtectedRoute>} />
             <Route path="/stores" element={<ProtectedRoute roles={["it_admin","manager"]}><Stores /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute roles={["it_admin","manager"]}><Settings /></ProtectedRoute>} />
