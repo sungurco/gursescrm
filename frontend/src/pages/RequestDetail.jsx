@@ -323,7 +323,7 @@ export default function RequestDetail() {
             </Card>
           )}
 
-          {isStoreOwner && !isClosed && (
+          {(isStoreOwner || isAdmin) && !isClosed && (
             <Card className="border-slate-200 shadow-none">
               <CardHeader><CardTitle className="font-heading tracking-tight text-lg">Eylemler</CardTitle></CardHeader>
               <CardContent className="space-y-2">
@@ -333,7 +333,9 @@ export default function RequestDetail() {
                 {!canEdit && r.assigned_to && (
                   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Talep üstlenildi, düzenleme kapalı.</div>
                 )}
-                <Button data-testid="cancel-btn" onClick={()=>changeStatus("cancelled")} variant="outline" className="w-full">Talebi İptal Et</Button>
+                {isStoreOwner && (
+                  <Button data-testid="cancel-btn" onClick={()=>changeStatus("cancelled")} variant="outline" className="w-full">Talebi İptal Et</Button>
+                )}
               </CardContent>
             </Card>
           )}
