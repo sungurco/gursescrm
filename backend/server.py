@@ -172,6 +172,11 @@ ACTION_LABELS = {
     "upsert_brand": "Marka kâr marjı ayarladı",
     "delete_brand": "Marka sildi",
     "update_logo": "Şirket logosunu güncelledi",
+    "backup_full": "Tam veritabanı yedeği aldı",
+    "backup_users": "Kullanıcı yedeği aldı",
+    "restore_full": "Yedekten tam geri yükleme yaptı",
+    "restore_users": "Kullanıcı yedeğinden geri yükleme yaptı",
+    "reset_database": "VERİTABANINI SIFIRLADI",
 }
 
 def describe_audit(action: str, meta: dict) -> str:
@@ -784,6 +789,142 @@ async def report_requests(
         if date_to: q["created_at"]["$lte"] = date_to + "T23:59:59Z"
     items = await db.requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
     return items
+
+# -------------------- Backup / Restore / Reset --------------------
+BACKUP_COLLECTIONS = ["users", "stores", "brands", "requests", "audit_logs", "settings", "counters"]
+APP_VERSION = "1.0.0"
+
+class PasswordConfirmIn(BaseModel):
+    password: str
+
+async def _verify_admin_password(user: dict, password: str):
+    full = await db.users.find_one({"id": user["id"]})
+    if not full or not verify_password(password, full["password_hash"]):
+        raise HTTPException(status_code=403, detail="Şifre yanlış. İşlem iptal edildi.")
+
+def _mongo_safe_doc(d: dict) -> dict:
+    """Remove Mongo's internal _id (ObjectId) so the doc is JSON-serializable."""
+    d.pop("_id", None)
+    return d
+
+@api.get("/admin/backup")
+async def backup_full(user: dict = Depends(require_roles("it_admin"))):
+    """Download a full database backup as JSON (all collections)."""
+    data = {
+        "_meta": {
+            "version": APP_VERSION,
+            "app": "Gürses CRM",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["email"],
+            "collections": BACKUP_COLLECTIONS,
+        }
+    }
+    for c in BACKUP_COLLECTIONS:
+        docs = await db[c].find({}).to_list(100000)
+        data[c] = [_mongo_safe_doc(d) for d in docs]
+    await log_audit(user, "backup_full", "system", "all", {"size": sum(len(data[c]) for c in BACKUP_COLLECTIONS)})
+    import json
+    body = json.dumps(data, ensure_ascii=False, default=str, indent=2).encode("utf-8")
+    fname = f"gurses-crm-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json"
+    return FastAPIResponse(content=body, media_type="application/json",
+                           headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+@api.get("/admin/backup/users")
+async def backup_users(user: dict = Depends(require_roles("it_admin"))):
+    """Download just the users collection (with password hashes preserved)."""
+    docs = await db.users.find({}).to_list(10000)
+    data = {
+        "_meta": {
+            "version": APP_VERSION,
+            "type": "users_only",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["email"],
+        },
+        "users": [_mongo_safe_doc(d) for d in docs],
+    }
+    await log_audit(user, "backup_users", "system", "users", {"count": len(docs)})
+    import json
+    body = json.dumps(data, ensure_ascii=False, default=str, indent=2).encode("utf-8")
+    fname = f"gurses-crm-users-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json"
+    return FastAPIResponse(content=body, media_type="application/json",
+                           headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+@api.post("/admin/restore")
+async def restore_full(file: UploadFile = File(...), password: str = Form(...),
+                       user: dict = Depends(require_roles("it_admin"))):
+    """Restore database from a full backup JSON. WIPES current data first."""
+    await _verify_admin_password(user, password)
+    import json
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz yedek dosyası (JSON parse hatası)")
+    if "_meta" not in data:
+        raise HTTPException(status_code=400, detail="Geçersiz yedek formatı: _meta bölümü yok")
+    restored = {}
+    for c in BACKUP_COLLECTIONS:
+        items = data.get(c, [])
+        if not isinstance(items, list):
+            continue
+        await db[c].delete_many({})
+        if items:
+            await db[c].insert_many(items)
+        restored[c] = len(items)
+    await log_audit(user, "restore_full", "system", "all", {"restored": restored})
+    return {"ok": True, "restored": restored}
+
+@api.post("/admin/restore/users")
+async def restore_users(file: UploadFile = File(...), password: str = Form(...),
+                        mode: str = Form("merge"),
+                        user: dict = Depends(require_roles("it_admin"))):
+    """Restore users from a users-only backup. mode: 'merge' (upsert by email) or 'replace' (wipe first)."""
+    await _verify_admin_password(user, password)
+    import json
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz yedek dosyası (JSON parse hatası)")
+    users = data.get("users", data if isinstance(data, list) else [])
+    if not isinstance(users, list) or not users:
+        raise HTTPException(status_code=400, detail="Yedek dosyada kullanıcı bulunamadı")
+    if mode == "replace":
+        # Keep current admin to avoid lockout
+        current_admin_id = user["id"]
+        await db.users.delete_many({"id": {"$ne": current_admin_id}})
+    inserted, updated = 0, 0
+    for u in users:
+        u.pop("_id", None)
+        email = (u.get("email") or "").lower()
+        if not email or "password_hash" not in u:
+            continue
+        u["email"] = email
+        existing = await db.users.find_one({"email": email})
+        if existing:
+            await db.users.update_one({"email": email}, {"$set": u})
+            updated += 1
+        else:
+            if "id" not in u: u["id"] = str(uuid.uuid4())
+            if "is_active" not in u: u["is_active"] = True
+            await db.users.insert_one(u)
+            inserted += 1
+    await log_audit(user, "restore_users", "system", "users",
+                    {"mode": mode, "inserted": inserted, "updated": updated})
+    return {"ok": True, "inserted": inserted, "updated": updated, "mode": mode}
+
+@api.post("/admin/reset")
+async def reset_database(payload: PasswordConfirmIn,
+                         user: dict = Depends(require_roles("it_admin"))):
+    """Wipe all collections and re-seed with default data. Destructive!"""
+    await _verify_admin_password(user, password=payload.password)
+    # Wipe everything
+    for c in BACKUP_COLLECTIONS:
+        await db[c].delete_many({})
+    # Re-seed
+    await seed_initial_data()
+    await log_audit(user, "reset_database", "system", "all", {})
+    return {"ok": True, "message": "Veritabanı sıfırlandı ve varsayılan veriler yüklendi."}
 
 # -------------------- Mount --------------------
 app.include_router(api)

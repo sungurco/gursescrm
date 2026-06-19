@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, ROLE_LABELS } from "@/lib/api";
-import { LayoutDashboard, ClipboardList, KanbanSquare, ShieldCheck, Users, Store, Settings, ScrollText, LogOut, Plus } from "lucide-react";
+import { LayoutDashboard, ClipboardList, KanbanSquare, ShieldCheck, Users, Store, Settings, ScrollText, LogOut, Plus, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const NAV = [
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/users", label: "Kullanıcılar", icon: Users, roles: ["it_admin"], testid: "nav-users" },
   { to: "/stores", label: "Mağazalar", icon: Store, roles: ["it_admin","manager"], testid: "nav-stores" },
   { to: "/reports", label: "Raporlar", icon: ScrollText, roles: ["manager","it_admin"], permission: "can_view_reports", testid: "nav-reports" },
+  { to: "/backup", label: "Yedekleme", icon: Database, roles: ["it_admin"], testid: "nav-backup" },
   { to: "/settings", label: "Ayarlar", icon: Settings, roles: ["it_admin","manager"], testid: "nav-settings" },
 ];
 

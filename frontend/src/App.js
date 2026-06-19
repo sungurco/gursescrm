@@ -14,6 +14,7 @@ import Users from "@/pages/Users";
 import Stores from "@/pages/Stores";
 import Settings from "@/pages/Settings";
 import Reports from "@/pages/Reports";
+import Backup from "@/pages/Backup";
 import "@/App.css";
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
             <Route path="/stores" element={<ProtectedRoute roles={["it_admin","manager"]}><Stores /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute roles={["it_admin","manager"]}><Settings /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute roles={["it_admin","manager"]} permission="can_view_reports"><Reports /></ProtectedRoute>} />
+            <Route path="/backup" element={<ProtectedRoute roles={["it_admin"]}><Backup /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>
